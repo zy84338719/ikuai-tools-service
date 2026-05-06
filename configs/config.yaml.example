@@ -1,0 +1,60 @@
+server:
+  host: "0.0.0.0"
+  port: 9997
+  mode: "debug"
+  read_timeout: 30
+  write_timeout: 30
+
+database:
+  driver: "sqlite"
+  db_name: "ikuai-tools-service.db"
+
+log:
+  level: "info"
+  filename: ""        # empty = stdout; set a path like "logs/app.log" for file output
+  max_size: 100       # MB per file
+  max_backups: 10
+  max_age: 30         # days
+  compress: true
+
+app:
+  name: "ikuai-tools-service"
+  version: "1.0.0"
+
+ikuai:
+  base_url: "http://<router-ip>"   # e.g. http://192.168.1.1
+  username: "<username>"            # iKuai admin username
+  password: "<password>"            # iKuai admin password
+  timeout: 30                       # seconds per request
+
+metrics:
+  enabled: true
+  namespace: "ikuai"
+  path: "/metrics"
+  port: 9100          # Prometheus exporter port (separate from the main API port)
+
+jobs:
+  skip_start: false   # true = don't run jobs immediately on startup, wait for first cron tick
+  gh_proxy: ""        # GitHub proxy prefix, e.g. "https://ghproxy.com"
+                      # Applied automatically to raw.githubusercontent.com / github.com URLs.
+
+  # max_per_record controls the maximum entries per iKuai rule record.
+  # Defaults match iKuai firmware limits; only override if your firmware differs.
+  max_per_record:
+    isp: 5000         # max IPs per custom_isp record
+    domain: 1000      # max domains per stream_domain record
+
+  # custom_isp:
+  #   - cron: "0 */4 * * *"    # every 4 hours (standard cron syntax) or a Go duration like "4h"
+  #     tag: "cn"               # identifies owned records; iKuai name = "IKBcn"
+  #     url:
+  #       - "https://raw.githubusercontent.com/user/repo/main/isp-list.txt"
+
+  # stream_domain:
+  #   - cron: "0 */4 * * *"
+  #     tag: "proxy"            # identifies owned records; comment = "IKBproxy:1", "IKBproxy:2", ...
+  #     interface:
+  #       - "wan1"              # iKuai WAN interface name(s)
+  #     src_addr: ""            # optional source address filter
+  #     url:
+  #       - "https://raw.githubusercontent.com/user/repo/main/domain-list.txt"
