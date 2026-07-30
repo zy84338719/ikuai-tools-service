@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"fmt"
+	neturl "net/url"
 	"net/http"
 	"os"
 
@@ -203,13 +204,23 @@ func registerIKuaiRoutes(h *server.Hertz) {
 func initMetrics(cfg *conf.Config) *prometheus.Registry {
 	registry := prometheus.NewRegistry()
 	m := ikuai.Get()
-	if m != nil {
-		collector := exportermetrics.NewCollector(cfg.Metrics.Namespace, m.Client())
+	if m != nil && m.Client() != nil {
+		routerLabel := routerLabelFromCfg(cfg)
+		collector := exportermetrics.NewCollector(cfg.Metrics.Namespace, routerLabel, m.Client())
 		if err := registry.Register(collector); err != nil {
 			logger.Error(fmt.Sprintf("failed to register metrics collector: %v", err))
 		}
 	}
 	return registry
+}
+
+// routerLabelFromCfg derives a default "router" label value from the ikuai
+// base_url. Returns "default" when the URL cannot be parsed.
+func routerLabelFromCfg(cfg *conf.Config) string {
+	if u, err := neturl.Parse(cfg.IKuai.BaseURL); err == nil && u.Hostname() != "" {
+		return u.Hostname()
+	}
+	return "default"
 }
 
 func startMetricsServer(cfg *conf.Config, registry *prometheus.Registry) {
