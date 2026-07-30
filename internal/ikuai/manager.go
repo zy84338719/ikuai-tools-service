@@ -15,129 +15,169 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
 )
 
-var globalManager *Manager
+// ErrRouterNotFound is returned when no manager is registered for a name.
+var ErrRouterNotFound = errors.New("ikuai router not found")
 
-// Manager wraps the v4-only SDK client.
-//
-// The v4 REST API is stateless: a personal Bearer token authorizes every
-// request, so there is no login / session-keepalive lifecycle (the old v3
-// username/password flow has been removed by the SDK). Init validates the
-// token with one probe request and constructs the typed APIClient once.
+// ErrNotConnected is returned when the named router has no usable client.
+var ErrNotConnected = errors.New("ikuai client not connected")
+
+// Manager wraps one v4-only SDK client for a single router.
 type Manager struct {
-	mu     sync.RWMutex
-	client *ikuaiapi.Client // stable pointer — never replaced after Init
+	name   string
+	client *ikuaiapi.Client
 	api    *service.APIClient
-	cfg    *conf.IKuaiConfig
-	stopCh chan struct{}
 }
 
-// Init creates the Manager with a stable *Client and validates the token.
+// Registry holds the set of managers, one per configured router. It replaces
+// the old global single-instance Manager. The zero value is not usable; build
+// one with NewRegistry and populate via Add/Reload.
+type Registry struct {
+	mu       sync.RWMutex
+	managers map[string]*Manager
+	default_ string // name used when a caller doesn't specify one (legacy Get())
+}
+
+var globalRegistry = &Registry{managers: map[string]*Manager{}}
+
+// GetRegistry returns the process-wide registry.
+func GetRegistry() *Registry { return globalRegistry }
+
+// Get returns the default manager (the first registered one), or nil. Kept for
+// backward compatibility with code that does not (yet) address a specific
+// router, e.g. the metrics collector.
+func Get() *Manager {
+	return globalRegistry.Default()
+}
+
+// Init bootstraps the registry from config. It seeds a "default" router from
+// the legacy single-router ikuai config block (if a token is set) so existing
+// deployments keep working, then loads any ikuai.routers entries.
 func Init(cfg *conf.IKuaiConfig) error {
-	if globalManager != nil {
-		return nil
+	if cfg.Token != "" {
+		m, err := buildManager("default", cfg.BaseURL, cfg.Token, cfg.Insecure, cfg.Timeout)
+		if err != nil {
+			return fmt.Errorf("init default router: %w", err)
+		}
+		globalRegistry.Add("default", m)
+		logger.Info("iKuai default router connected (v4 token mode)")
 	}
-	if cfg.Token == "" {
-		// The v4-only SDK has no username/password login. Keep going so the
-		// rest of the service (HTTP API, jobs) can still start; API() will
-		// surface the misconfiguration on first use.
-		logger.Error("ikuai.token is empty — v4 REST API requires a personal token (系统设置 → 个人令牌); ikuai client disabled until configured")
-		globalManager = &Manager{cfg: cfg, stopCh: make(chan struct{})}
-		return nil
-	}
-
-	client, err := ikuaiapi.NewClient(
-		cfg.BaseURL,
-		ikuaiapi.WithToken(cfg.Token),
-		ikuaiapi.WithTimeout(time.Duration(cfg.Timeout)*time.Second),
-		ikuaiapi.WithInsecureSkipVerify(cfg.Insecure),
-	)
-	if err != nil {
-		return fmt.Errorf("create ikuai client: %w", err)
-	}
-
-	m := &Manager{cfg: cfg, client: client, api: service.NewAPIClient(client), stopCh: make(chan struct{})}
-	if err := m.probe(context.Background()); err != nil {
-		logger.Error(fmt.Sprintf("ikuai token probe failed (continuing, will retry): %v", err))
-	} else {
-		logger.Info("iKuai client connected (v4 token mode)")
-	}
-	globalManager = m
-	go m.healthKeeper()
+	// Routers configured in the DB or via ikuai.routers are loaded later by
+	// ReloadFromDB; config-file routers are handled by the caller.
 	return nil
 }
 
-func Get() *Manager {
-	return globalManager
-}
-
-// probe sends a lightweight request to confirm the token works.
-func (m *Manager) probe(ctx context.Context) error {
-	if m.api == nil {
-		return errors.New("ikuai client not configured (token empty?)")
+// buildManager constructs a Manager, validates the token with one probe, and
+// starts nothing in the background (v4 is stateless).
+func buildManager(name, baseURL, token string, insecure bool, timeoutSec int) (*Manager, error) {
+	timeout := time.Duration(timeoutSec) * time.Second
+	if timeout <= 0 {
+		timeout = 30 * time.Second
 	}
-	pctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	client, err := ikuaiapi.NewClient(baseURL,
+		ikuaiapi.WithToken(token),
+		ikuaiapi.WithTimeout(timeout),
+		ikuaiapi.WithInsecureSkipVerify(insecure),
+	)
+	if err != nil {
+		return nil, err
+	}
+	m := &Manager{name: name, client: client, api: service.NewAPIClient(client)}
+	// Best-effort probe; don't fail construction if the router is temporarily
+	// unreachable — the registry still serves other routers.
+	pctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
-	_, err := m.api.Monitoring().GetMonitoringSystem(pctx)
-	return err
+	if _, err := m.api.Monitoring().GetMonitoringSystem(pctx); err != nil {
+		logger.Error(fmt.Sprintf("ikuai router %q probe failed (continuing): %v", name, err))
+	} else {
+		logger.Info(fmt.Sprintf("ikuai router %q connected", name))
+	}
+	return m, nil
 }
 
-// healthKeeper periodically probes the router. The v4 API is stateless so
-// there is no re-login; this only logs connectivity changes for observability.
-func (m *Manager) healthKeeper() {
-	ticker := time.NewTicker(10 * time.Minute)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-m.stopCh:
-			return
-		case <-ticker.C:
-			if m.api == nil {
-				continue
-			}
-			ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-			if _, err := m.api.Monitoring().GetMonitoringSystem(ctx); err != nil {
-				logger.Error(fmt.Sprintf("ikuai probe failed: %v", err))
-			}
-			cancel()
+// Add registers (or replaces) a manager under the given name.
+func (r *Registry) Add(name string, m *Manager) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if r.default_ == "" {
+		r.default_ = name
+	}
+	r.managers[name] = m
+}
+
+// Remove unregisters a manager and closes its client.
+func (r *Registry) Remove(name string) {
+	r.mu.Lock()
+	m := r.managers[name]
+	delete(r.managers, name)
+	if r.default_ == name {
+		// pick a new default
+		r.default_ = ""
+		for n := range r.managers {
+			r.default_ = n
+			break
 		}
 	}
+	r.mu.Unlock()
+	if m != nil {
+		m.client.Close()
+	}
 }
 
-// API returns the typed APIClient, or nil if the manager was not configured
-// (e.g. token was empty at startup).
-func (m *Manager) API() *service.APIClient {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.api
+// Get returns the manager for name, or nil.
+func (r *Registry) Get(name string) *Manager {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.managers[name]
 }
 
-// Client returns the stable *Client pointer. Callers that need an endpoint
-// not covered by the typed service layer can use Client().Get/Post/...
-// directly with an arbitrary path.
-func (m *Manager) Client() *ikuaiapi.Client {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.client
+// Default returns the default manager (first registered), or nil.
+func (r *Registry) Default() *Manager {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.default_ == "" {
+		return nil
+	}
+	return r.managers[r.default_]
 }
+
+// Names returns the registered router names.
+func (r *Registry) Names() []string {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]string, 0, len(r.managers))
+	for n := range r.managers {
+		out = append(out, n)
+	}
+	return out
+}
+
+// Close closes every registered client.
+func (r *Registry) Close() {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	for _, m := range r.managers {
+		m.client.Close()
+	}
+	r.managers = map[string]*Manager{}
+	r.default_ = ""
+}
+
+// --- per-manager accessors ---
+
+func (m *Manager) Name() string { return m.name }
+
+// API returns the typed APIClient.
+func (m *Manager) API() *service.APIClient { return m.api }
+
+// Client returns the underlying SDK client for escape-hatch calls.
+func (m *Manager) Client() *ikuaiapi.Client { return m.client }
 
 // IsConnected reports whether the manager has a usable client.
-func (m *Manager) IsConnected() bool {
-	m.mu.RLock()
-	defer m.mu.RUnlock()
-	return m.api != nil
-}
+func (m *Manager) IsConnected() bool { return m != nil && m.api != nil }
 
-// Close stops the background health keeper and closes the underlying client.
+// Close releases the underlying transport.
 func (m *Manager) Close() {
-	select {
-	case <-m.stopCh:
-		// already closed
-	default:
-		close(m.stopCh)
-	}
-	m.mu.Lock()
-	defer m.mu.Unlock()
-	if m.client != nil {
+	if m != nil && m.client != nil {
 		m.client.Close()
 	}
 }
@@ -146,8 +186,7 @@ func (m *Manager) Close() {
 //
 // A handful of iKuai features (custom_isp, stream_domain, stream_ipport,
 // conn_limit, dns static) have no v4 REST endpoint. The firmware still serves
-// the /Action/call RPC on v4, so callers can fall back to this method. It
-// returns the inner Data payload of the response.
+// the /Action/call RPC on v4, so callers can fall back to this method.
 func (m *Manager) ActionCall(ctx context.Context, funcName, action string, param any) (json.RawMessage, error) {
 	client := m.Client()
 	if client == nil {
@@ -185,8 +224,6 @@ func (m *Manager) ActionCall(ctx context.Context, funcName, action string, param
 }
 
 // isAuthError reports whether err looks like an auth/permission failure.
-// The v4 SDK returns *ikuaiapi.APIError; we also keep a few string heuristics
-// for the /Action/call escape hatch used by the custom_isp/stream_domain jobs.
 func isAuthError(err error) bool {
 	if err == nil {
 		return false
@@ -200,4 +237,41 @@ func isAuthError(err error) bool {
 	return false
 }
 
-var ErrNotConnected = errors.New("ikuai client not connected")
+// EnsureRouterByName resolves a manager by name (the :router_id path value),
+// returning a clear error when it is missing/disabled. Handlers use this.
+func EnsureRouterByName(name string) (*Manager, error) {
+	m := GetRegistry().Get(name)
+	if m == nil {
+		return nil, fmt.Errorf("%w: %q", ErrRouterNotFound, name)
+	}
+	return m, nil
+}
+
+// RouterSpec carries the fields needed to build a Manager, decoupling the
+// ikuai package from the DB model.
+type RouterSpec struct {
+	Name     string
+	BaseURL  string
+	Token    string
+	Insecure bool
+	Timeout  int
+}
+
+// BuildFromRouter constructs a Manager from a RouterSpec (used by handlers when
+// adding/reloading routers from the DB).
+func BuildFromRouter(s RouterSpec) (*Manager, error) {
+	return buildManager(s.Name, s.BaseURL, s.Token, s.Insecure, s.Timeout)
+}
+
+// LoadAll loads every spec into the registry (replacing existing entries with
+// the same name). Used at startup to hydrate from the DB.
+func (r *Registry) LoadAll(specs []RouterSpec) {
+	for _, s := range specs {
+		m, err := buildManager(s.Name, s.BaseURL, s.Token, s.Insecure, s.Timeout)
+		if err != nil {
+			logger.Error(fmt.Sprintf("load router %q failed: %v", s.Name, err))
+			continue
+		}
+		r.Add(s.Name, m)
+	}
+}

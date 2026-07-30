@@ -9,10 +9,15 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
-// GetSyncStatus returns the last execution status of all sync jobs.
-// @router /api/v1/ikuai/sync/status [GET]
+// GetSyncStatus returns the last execution status of all sync jobs plus recent
+// persisted history.
+// @router /api/v1/ikuai/:router_id/sync/status [GET]
 func GetSyncStatus(ctx context.Context, c *app.RequestContext) {
-	resp.Success(c, job.GetAllStatuses())
+	history, _ := job.ListHistory(50)
+	resp.Success(c, map[string]any{
+		"current": job.GetAllStatuses(),
+		"history": history,
+	})
 }
 
 type TriggerCustomISPReq struct {
@@ -46,9 +51,10 @@ func TriggerCustomISPSync(ctx context.Context, c *app.RequestContext) {
 		Comment: req.Comment,
 	}
 	jobsCfg := globalJobsConfig(req.GhProxy)
+	routerID := routerIDFromCtx(c)
 
 	go func() {
-		_ = job.SyncCustomISP(cfg, jobsCfg)
+		_ = job.SyncCustomISP(routerID, cfg, jobsCfg)
 	}()
 
 	resp.SuccessWithMessage(c, "custom ISP sync triggered", nil)
@@ -84,9 +90,10 @@ func TriggerStreamDomainSync(ctx context.Context, c *app.RequestContext) {
 		Comment:   req.Comment,
 	}
 	jobsCfg := globalJobsConfig(req.GhProxy)
+	routerID := routerIDFromCtx(c)
 
 	go func() {
-		_ = job.SyncStreamDomain(cfg, jobsCfg)
+		_ = job.SyncStreamDomain(routerID, cfg, jobsCfg)
 	}()
 
 	resp.SuccessWithMessage(c, "stream domain sync triggered", nil)

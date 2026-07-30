@@ -31,16 +31,18 @@ type customISPItem struct {
 	IPGroup string `json:"ipgroup"`
 }
 
-func SyncCustomISP(cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) error {
+// SyncCustomISP runs the custom-isp sync against one router. The scheduler
+// calls this once per registered router.
+func SyncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) error {
 	tag := cfg.GetTag()
 	name := "custom-isp/" + tag
-	markRunning(name)
-	err := syncCustomISP(cfg, jobsCfg)
-	markDone(name, err)
+	markRunning(routerID, name)
+	err := syncCustomISP(routerID, cfg, jobsCfg)
+	markDone(routerID, name, err)
 	return err
 }
 
-func syncCustomISP(cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) error {
+func syncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) error {
 	start := time.Now()
 	tag := cfg.GetTag()
 	tagName := buildTagName(tag)
@@ -50,19 +52,19 @@ func syncCustomISP(cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) erro
 	for _, u := range cfg.Url {
 		lines, err := fetchLines(u, jobsCfg.GhProxy)
 		if err != nil {
-			logger.Error(fmt.Sprintf("custom-isp/%s: fetch %s failed: %v", tag, u, err))
+			logger.Error(fmt.Sprintf("custom-isp/%s[%s]: fetch %s failed: %v", tag, routerID, u, err))
 			continue
 		}
-		logger.Info(fmt.Sprintf("custom-isp/%s: fetched %s rows=%d", tag, u, len(lines)))
+		logger.Info(fmt.Sprintf("custom-isp/%s[%s]: fetched %s rows=%d", tag, routerID, u, len(lines)))
 		rows = append(rows, lines...)
 	}
 	if len(rows) == 0 {
-		logger.Info(fmt.Sprintf("custom-isp/%s: no rows fetched, skipping", tag))
+		logger.Info(fmt.Sprintf("custom-isp/%s[%s]: no rows fetched, skipping", tag, routerID))
 		return nil
 	}
 	rows = dedupe(rows)
 
-	m := ikuai.Get()
+	m := ikuai.GetRegistry().Get(routerID)
 	if m == nil || m.Client() == nil {
 		return errNoClient
 	}
@@ -103,8 +105,9 @@ func syncCustomISP(cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) erro
 	// --- chunk and sync ---
 	chunkSize := jobsCfg.MaxPerRecord.ISPLimit()
 	chunks := splitChunks(rows, chunkSize)
-	logger.Info(fmt.Sprintf("custom-isp/%s: %d rows → %d chunks (max %d each)", tag, len(rows), len(chunks), chunkSize))
+	logger.Info(fmt.Sprintf("custom-isp/%s[%s]: %d rows → %d chunks (max %d each)", tag, routerID, len(rows), len(chunks), chunkSize))
 
+	var changed, failed int
 	for i, chunk := range chunks {
 		chunkIdx := i + 1
 		comment := buildChunkComment(chunkIdx)
@@ -117,19 +120,25 @@ func syncCustomISP(cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) erro
 				"ipgroup": ipGroup,
 				"comment": comment,
 			}); err != nil {
-				return fmt.Errorf("custom-isp/%s: edit chunk %d (id=%d): %w", tag, chunkIdx, id, err)
+				failed++
+				logger.Error(fmt.Sprintf("custom-isp/%s[%s]: edit chunk %d (id=%d): %v", tag, routerID, chunkIdx, id, err))
+				continue
 			}
 			delete(existing, chunkIdx)
-			logger.Info(fmt.Sprintf("custom-isp/%s: edited chunk %d id=%d entries=%d", tag, chunkIdx, id, len(chunk)))
+			changed++
+			logger.Info(fmt.Sprintf("custom-isp/%s[%s]: edited chunk %d id=%d entries=%d", tag, routerID, chunkIdx, id, len(chunk)))
 		} else {
 			if _, err := m.ActionCall(ctx, "custom_isp", "add", map[string]any{
 				"name":    tagName,
 				"ipgroup": ipGroup,
 				"comment": comment,
 			}); err != nil {
-				return fmt.Errorf("custom-isp/%s: add chunk %d: %w", tag, chunkIdx, err)
+				failed++
+				logger.Error(fmt.Sprintf("custom-isp/%s[%s]: add chunk %d: %v", tag, routerID, chunkIdx, err))
+				continue
 			}
-			logger.Info(fmt.Sprintf("custom-isp/%s: added chunk %d entries=%d", tag, chunkIdx, len(chunk)))
+			changed++
+			logger.Info(fmt.Sprintf("custom-isp/%s[%s]: added chunk %d entries=%d", tag, routerID, chunkIdx, len(chunk)))
 		}
 	}
 
@@ -138,13 +147,21 @@ func syncCustomISP(cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) erro
 		if _, err := m.ActionCall(ctx, "custom_isp", "del", map[string]any{
 			"id": fmt.Sprintf("%d", id),
 		}); err != nil {
-			logger.Error(fmt.Sprintf("custom-isp/%s: delete stale chunk %d (id=%d): %v", tag, idx, id, err))
+			failed++
+			logger.Error(fmt.Sprintf("custom-isp/%s[%s]: delete stale chunk %d (id=%d): %v", tag, routerID, idx, id, err))
 		} else {
-			logger.Info(fmt.Sprintf("custom-isp/%s: deleted stale chunk %d id=%d", tag, idx, id))
+			changed++
+			logger.Info(fmt.Sprintf("custom-isp/%s[%s]: deleted stale chunk %d id=%d", tag, routerID, idx, id))
 		}
 	}
 
-	logger.Info(fmt.Sprintf("custom-isp/%s: done total=%d chunks=%d duration=%s",
-		tag, len(rows), len(chunks), time.Since(start)))
+	dur := time.Since(start)
+	status := "success"
+	if failed > 0 {
+		status = "partial"
+	}
+	recordRun(routerID, "custom-isp", tag, status, changed, failed, dur, "")
+	logger.Info(fmt.Sprintf("custom-isp/%s[%s]: done total=%d chunks=%d changed=%d failed=%d duration=%s",
+		tag, routerID, len(rows), len(chunks), changed, failed, dur))
 	return nil
 }

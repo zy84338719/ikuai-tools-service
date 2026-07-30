@@ -6,7 +6,6 @@ import (
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
@@ -15,7 +14,7 @@ import (
 // ikuai.Manager.ActionCall). TODO(router-verify).
 
 func ListCustomISP(ctx context.Context, c *app.RequestContext) {
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -46,7 +45,7 @@ func AddCustomISP(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "name and ip_group are required")
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -66,7 +65,7 @@ func DeleteCustomISP(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "invalid ids: "+err.Error())
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -82,7 +81,7 @@ func DeleteCustomISP(ctx context.Context, c *app.RequestContext) {
 // stream_domain has no v4 REST endpoint; falls back to /Action/call.
 
 func ListStreamDomain(ctx context.Context, c *app.RequestContext) {
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -114,7 +113,7 @@ func AddStreamDomain(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "interface and domains are required")
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -135,7 +134,7 @@ func DeleteStreamDomain(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "invalid ids: "+err.Error())
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return

@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
@@ -100,7 +99,7 @@ func DeleteIPGroup(ctx context.Context, c *app.RequestContext) {
 // stream_ipport has no v4 REST endpoint; falls back to /Action/call.
 
 func ListStreamIPPort(ctx context.Context, c *app.RequestContext) {
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -124,7 +123,7 @@ func AddStreamIPPort(ctx context.Context, c *app.RequestContext) {
 	if req["enabled"] == nil {
 		req["enabled"] = "yes"
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -142,7 +141,7 @@ func EditStreamIPPort(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -160,7 +159,7 @@ func DeleteStreamIPPort(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "invalid ids: "+err.Error())
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -177,7 +176,7 @@ func DeleteStreamIPPort(ctx context.Context, c *app.RequestContext) {
 // TODO(router-verify): v4 equivalent may be security/peerconn/rules.
 
 func ListConnLimit(ctx context.Context, c *app.RequestContext) {
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -198,7 +197,7 @@ func AddConnLimit(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -216,7 +215,7 @@ func EditConnLimit(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -234,7 +233,7 @@ func DeleteConnLimit(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "invalid id")
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return

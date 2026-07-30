@@ -59,7 +59,7 @@ func Init(cfg *conf.DatabaseConfig) error {
 
 	// AutoMigrate keeps the schema in sync with the models. Add new models here
 	// as they are introduced (audit logs, routers, job runs, ...).
-	if err := DB.AutoMigrate(&model.User{}, &model.AuditLog{}); err != nil {
+	if err := DB.AutoMigrate(&model.User{}, &model.AuditLog{}, &model.Router{}, &model.JobRun{}); err != nil {
 		return fmt.Errorf("auto-migrate: %w", err)
 	}
 

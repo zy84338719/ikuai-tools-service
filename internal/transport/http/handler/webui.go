@@ -69,9 +69,11 @@ pre{font-size:12px;background:#f6f8fa;padding:12px;border-radius:4px;overflow-x:
 <body>
 <div class="nav">
   <h1>iKuai Tools</h1>
+  <select id="router-select" onchange="onRouterChange()" style="padding:4px 8px;border-radius:4px;border:none;font-size:13px;max-width:180px"></select>
   <a onclick="showPage('status')" id="tab-status">系统状态</a>
   <a onclick="showPage('firewall')" id="tab-firewall">防火墙规则</a>
   <a onclick="showPage('sync')" id="tab-sync">同步任务</a>
+  <a onclick="showPage('routers')" id="tab-routers">路由器管理</a>
 </div>
 <div class="container">
 
@@ -134,28 +136,103 @@ pre{font-size:12px;background:#f6f8fa;padding:12px;border-radius:4px;overflow-x:
   </div>
 </div>
 
+<!-- 路由器管理页 -->
+<div id="page-routers">
+  <div class="card">
+    <h2>已管理的路由器</h2>
+    <button class="btn btn-default" onclick="loadRoutersPage()">刷新</button>
+    <div id="routers-table" style="margin-top:12px"></div>
+  </div>
+  <div class="card">
+    <h2>添加 / 编辑路由器</h2>
+    <div id="msg-router"></div>
+    <div class="form-row">
+      <div class="form-group"><label>名称（唯一标识）</label><input id="rt-name" placeholder="office"></div>
+      <div class="form-group"><label>地址</label><input id="rt-url" placeholder="https://192.168.1.1"></div>
+      <div class="form-group"><label>Token</label><input id="rt-token" placeholder="个人API令牌"></div>
+    </div>
+    <div class="form-row">
+      <div class="form-group"><label>备注</label><input id="rt-comment" placeholder=""></div>
+    </div>
+    <button class="btn btn-primary" onclick="addRouter()">添加</button>
+  </div>
+</div>
+
 </div>
 
 <script>
-const API = '/api/v1/ikuai';
+let currentRouter = localStorage.getItem('ikuai-router') || '';
+let apiKey = localStorage.getItem('ikuai-apikey') || '';
 let currentFwTab = '';
 
+function apiBase() { return '/api/v1/ikuai/' + encodeURIComponent(currentRouter); }
+function authHeaders(extra={}) {
+  const h = {'Content-Type':'application/json', ...extra};
+  if (apiKey) h['Authorization'] = 'Bearer ' + apiKey;
+  return h;
+}
+
+async function api(path, opts={}) {
+  const r = await fetch(apiBase()+path, {headers:authHeaders(), ...opts});
+  return r.json();
+}
+
+async function loadRouters() {
+  try {
+    const r = await fetch('/api/v1/routers', {headers:authHeaders()});
+    const j = await r.json();
+    const sel = document.getElementById('router-select');
+    sel.innerHTML = '';
+    const list = (j.data||[]);
+    if (list.length === 0) {
+      sel.innerHTML = '<option value="">（请先添加路由器）</option>';
+      return;
+    }
+    list.forEach(rt => {
+      const o = document.createElement('option');
+      o.value = rt.name; o.textContent = rt.name;
+      sel.appendChild(o);
+    });
+    if (!currentRouter || !list.find(rt=>rt.name===currentRouter)) {
+      currentRouter = list[0].name;
+      localStorage.setItem('ikuai-router', currentRouter);
+    }
+    sel.value = currentRouter;
+  } catch(e) { console.error('load routers', e); }
+}
+
+function onRouterChange() {
+  currentRouter = document.getElementById('router-select').value;
+  localStorage.setItem('ikuai-router', currentRouter);
+  // refresh the active page
+  const active = document.querySelector('.nav a.active');
+  if (active) active.click();
+}
+
 function showPage(name) {
-  ['status','firewall','sync'].forEach(p=>{
-    document.getElementById('page-'+p).classList.remove('show');
-    document.getElementById('tab-'+p).classList.remove('active');
+  ['status','firewall','sync','routers'].forEach(p=>{
+    const pg = document.getElementById('page-'+p);
+    if (pg) pg.classList.remove('show');
+    const tb = document.getElementById('tab-'+p);
+    if (tb) tb.classList.remove('active');
   });
   document.getElementById('page-'+name).classList.add('show');
   document.getElementById('tab-'+name).classList.add('active');
   if(name==='status') loadStatus();
   if(name==='sync') loadSyncStatus();
+  if(name==='routers') loadRoutersPage();
   if(name==='firewall' && !currentFwTab) showFwTab('custom-isp');
 }
 
-async function api(path, opts={}) {
-  const r = await fetch(API+path, {headers:{'Content-Type':'application/json'},...opts});
-  return r.json();
-}
+// boot: ensure API key, then load routers
+(async function(){
+  if (!apiKey) {
+    apiKey = prompt('请输入 API Key（在 auth.api_key 配置中设置，留空则无鉴权）') || '';
+    if (apiKey) localStorage.setItem('ikuai-apikey', apiKey);
+  }
+  await loadRouters();
+  showPage('status');
+})();
 
 // ── Status ──────────────────────────────────────────────────────────────────
 async function loadStatus() {
@@ -306,12 +383,58 @@ function showMsg(id, text, type) {
   el.innerHTML='<div class="msg msg-'+type+'">'+escH(text)+'</div>';
 }
 
+// ── Routers management ───────────────────────────────────────────────────────
+async function loadRoutersPage() {
+  try {
+    const r = await fetch('/api/v1/routers', {headers:authHeaders()});
+    const j = await r.json();
+    const list = j.data || [];
+    const tbl = document.getElementById('routers-table');
+    if (!list.length) { tbl.innerHTML = '<div class="loading">暂无路由器</div>'; return; }
+    tbl.innerHTML = '<table><thead><tr><th>名称</th><th>地址</th><th>Token</th><th>状态</th><th>操作</th></tr></thead><tbody>' +
+      list.map(rt => '<tr><td>'+escH(rt.name)+'</td><td>'+escH(rt.base_url)+'</td><td>'+(rt.has_token?'已设置':'未设置')+'</td><td>'+(rt.status===1?'<span class="badge badge-ok">启用</span>':'<span class="badge badge-err">停用</span>')+'</td>'+
+      '<td><button class="btn btn-danger" onclick="delRouter(\''+escH(rt.name)+'\')">删除</button></td></tr>').join('') +
+      '</tbody></table>';
+    // also refresh the top selector
+    loadRouters();
+  } catch(e) { console.error('loadRoutersPage', e); }
+}
+
+async function addRouter() {
+  const body = {
+    name: document.getElementById('rt-name').value.trim(),
+    base_url: document.getElementById('rt-url').value.trim(),
+    token: document.getElementById('rt-token').value.trim(),
+    comment: document.getElementById('rt-comment').value.trim(),
+  };
+  if (!body.name || !body.base_url || !body.token) {
+    document.getElementById('msg-router').innerHTML = '<div class="msg msg-err">名称、地址、Token 均必填</div>';
+    return;
+  }
+  try {
+    const r = await fetch('/api/v1/routers', {method:'POST', headers:authHeaders(), body:JSON.stringify(body)});
+    const j = await r.json();
+    if (j.code === 0) {
+      document.getElementById('msg-router').innerHTML = '<div class="msg msg-ok">已添加并连接</div>';
+      ['rt-name','rt-url','rt-token','rt-comment'].forEach(id=>document.getElementById(id).value='');
+      loadRoutersPage();
+    } else {
+      document.getElementById('msg-router').innerHTML = '<div class="msg msg-err">'+escH(j.message||'添加失败')+'</div>';
+    }
+  } catch(e) {
+    document.getElementById('msg-router').innerHTML = '<div class="msg msg-err">'+escH(e.message)+'</div>';
+  }
+}
+
+async function delRouter(name) {
+  if (!confirm('确认删除路由器 '+name+'？')) return;
+  await fetch('/api/v1/routers/'+encodeURIComponent(name), {method:'DELETE', headers:authHeaders()});
+  loadRoutersPage();
+}
+
 // ── Helpers ──────────────────────────────────────────────────────────────────
 function escH(s) { return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
 function fmtSpeed(v) { if(!v)return '0 B/s'; if(v>1048576)return (v/1048576).toFixed(1)+' MB/s'; if(v>1024)return (v/1024).toFixed(1)+' KB/s'; return v+' B/s'; }
-
-// 初始化
-showPage('status');
 </script>
 </body>
 </html>`

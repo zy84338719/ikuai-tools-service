@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
@@ -124,7 +123,7 @@ func DeleteDHCPStatic(ctx context.Context, c *app.RequestContext) {
 // "dns_static"). TODO(router-verify).
 
 func ListDNSStatic(ctx context.Context, c *app.RequestContext) {
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -145,7 +144,7 @@ func AddDNSStatic(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -163,7 +162,7 @@ func EditDNSStatic(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return
@@ -181,7 +180,7 @@ func DeleteDNSStatic(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "invalid id")
 		return
 	}
-	m := ikuai.Get()
+	m := managerFor(c)
 	if m == nil || m.Client() == nil {
 		resp.InternalError(c, "ikuai client not connected")
 		return

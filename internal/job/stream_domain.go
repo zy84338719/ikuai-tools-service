@@ -25,16 +25,17 @@ type streamDomainItem struct {
 	Domain  string `json:"domain"`
 }
 
-func SyncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) error {
+// SyncStreamDomain runs the stream-domain sync against one router.
+func SyncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) error {
 	tag := cfg.GetTag()
 	name := "stream-domain/" + tag
-	markRunning(name)
-	err := syncStreamDomain(cfg, jobsCfg)
-	markDone(name, err)
+	markRunning(routerID, name)
+	err := syncStreamDomain(routerID, cfg, jobsCfg)
+	markDone(routerID, name, err)
 	return err
 }
 
-func syncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) error {
+func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) error {
 	start := time.Now()
 	tag := cfg.GetTag()
 
@@ -43,19 +44,19 @@ func syncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig
 	for _, u := range cfg.Url {
 		lines, err := fetchLines(u, jobsCfg.GhProxy)
 		if err != nil {
-			logger.Error(fmt.Sprintf("stream-domain/%s: fetch %s failed: %v", tag, u, err))
+			logger.Error(fmt.Sprintf("stream-domain/%s[%s]: fetch %s failed: %v", tag, routerID, u, err))
 			continue
 		}
-		logger.Info(fmt.Sprintf("stream-domain/%s: fetched %s rows=%d", tag, u, len(lines)))
+		logger.Info(fmt.Sprintf("stream-domain/%s[%s]: fetched %s rows=%d", tag, routerID, u, len(lines)))
 		rows = append(rows, lines...)
 	}
 	if len(rows) == 0 {
-		logger.Info(fmt.Sprintf("stream-domain/%s: no rows fetched, skipping", tag))
+		logger.Info(fmt.Sprintf("stream-domain/%s[%s]: no rows fetched, skipping", tag, routerID))
 		return nil
 	}
 	rows = dedupe(rows)
 
-	m := ikuai.Get()
+	m := ikuai.GetRegistry().Get(routerID)
 	if m == nil || m.Client() == nil {
 		return errNoClient
 	}
@@ -71,7 +72,7 @@ func syncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig
 		"limit": "0,500",
 	})
 	if err != nil {
-		return fmt.Errorf("stream-domain/%s: get existing: %w", tag, err)
+		return fmt.Errorf("stream-domain/%s[%s]: get existing: %w", tag, routerID, err)
 	}
 	var items []streamDomainItem
 	if err := json.Unmarshal(data, &items); err != nil {
@@ -81,7 +82,7 @@ func syncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig
 		if jerr := json.Unmarshal(data, &wrap); jerr == nil && len(wrap.Data) > 0 {
 			items = wrap.Data
 		} else {
-			return fmt.Errorf("stream-domain/%s: decode list: %w", tag, err)
+			return fmt.Errorf("stream-domain/%s[%s]: decode list: %w", tag, routerID, err)
 		}
 	}
 
@@ -95,8 +96,9 @@ func syncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig
 	// --- chunk and sync ---
 	chunkSize := jobsCfg.MaxPerRecord.DomainLimit()
 	chunks := splitChunks(rows, chunkSize)
-	logger.Info(fmt.Sprintf("stream-domain/%s: %d rows → %d chunks (max %d each)", tag, len(rows), len(chunks), chunkSize))
+	logger.Info(fmt.Sprintf("stream-domain/%s[%s]: %d rows → %d chunks (max %d each)", tag, routerID, len(rows), len(chunks), chunkSize))
 
+	var changed, failed int
 	for i, chunk := range chunks {
 		chunkIdx := i + 1
 		comment := buildStreamDomainComment(tag, chunkIdx)
@@ -104,28 +106,34 @@ func syncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig
 
 		if id, ok := existing[chunkIdx]; ok {
 			if _, err := m.ActionCall(ctx, "stream_domain", "edit", map[string]any{
-				"id":       id,
-				"enabled":  "yes",
+				"id":        id,
+				"enabled":   "yes",
 				"interface": iface,
-				"src_addr": srcAddr,
-				"domain":   domains,
-				"comment":  comment,
+				"src_addr":  srcAddr,
+				"domain":    domains,
+				"comment":   comment,
 			}); err != nil {
-				return fmt.Errorf("stream-domain/%s: edit chunk %d (id=%d): %w", tag, chunkIdx, id, err)
+				failed++
+				logger.Error(fmt.Sprintf("stream-domain/%s[%s]: edit chunk %d (id=%d): %v", tag, routerID, chunkIdx, id, err))
+				continue
 			}
 			delete(existing, chunkIdx)
-			logger.Info(fmt.Sprintf("stream-domain/%s: edited chunk %d id=%d entries=%d", tag, chunkIdx, id, len(chunk)))
+			changed++
+			logger.Info(fmt.Sprintf("stream-domain/%s[%s]: edited chunk %d id=%d entries=%d", tag, routerID, chunkIdx, id, len(chunk)))
 		} else {
 			if _, err := m.ActionCall(ctx, "stream_domain", "add", map[string]any{
-				"enabled":  "yes",
+				"enabled":   "yes",
 				"interface": iface,
-				"src_addr": srcAddr,
-				"domain":   domains,
-				"comment":  comment,
+				"src_addr":  srcAddr,
+				"domain":    domains,
+				"comment":   comment,
 			}); err != nil {
-				return fmt.Errorf("stream-domain/%s: add chunk %d: %w", tag, chunkIdx, err)
+				failed++
+				logger.Error(fmt.Sprintf("stream-domain/%s[%s]: add chunk %d: %v", tag, routerID, chunkIdx, err))
+				continue
 			}
-			logger.Info(fmt.Sprintf("stream-domain/%s: added chunk %d entries=%d", tag, chunkIdx, len(chunk)))
+			changed++
+			logger.Info(fmt.Sprintf("stream-domain/%s[%s]: added chunk %d entries=%d", tag, routerID, chunkIdx, len(chunk)))
 		}
 	}
 
@@ -134,13 +142,21 @@ func syncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig
 		if _, err := m.ActionCall(ctx, "stream_domain", "del", map[string]any{
 			"id": fmt.Sprintf("%d", id),
 		}); err != nil {
-			logger.Error(fmt.Sprintf("stream-domain/%s: delete stale chunk %d (id=%d): %v", tag, idx, id, err))
+			failed++
+			logger.Error(fmt.Sprintf("stream-domain/%s[%s]: delete stale chunk %d (id=%d): %v", tag, routerID, idx, id, err))
 		} else {
-			logger.Info(fmt.Sprintf("stream-domain/%s: deleted stale chunk %d id=%d", tag, idx, id))
+			changed++
+			logger.Info(fmt.Sprintf("stream-domain/%s[%s]: deleted stale chunk %d id=%d", tag, routerID, idx, id))
 		}
 	}
 
-	logger.Info(fmt.Sprintf("stream-domain/%s: done total=%d chunks=%d duration=%s",
-		tag, len(rows), len(chunks), time.Since(start)))
+	dur := time.Since(start)
+	status := "success"
+	if failed > 0 {
+		status = "partial"
+	}
+	recordRun(routerID, "stream-domain", tag, status, changed, failed, dur, "")
+	logger.Info(fmt.Sprintf("stream-domain/%s[%s]: done total=%d chunks=%d changed=%d failed=%d duration=%s",
+		tag, routerID, len(rows), len(chunks), changed, failed, dur))
 	return nil
 }

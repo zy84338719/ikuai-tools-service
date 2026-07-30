@@ -6,6 +6,7 @@ import (
 	neturl "net/url"
 	"net/http"
 	"os"
+	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
@@ -13,6 +14,7 @@ import (
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	exportermetrics "github.com/zy84338719/ikuai_exporter/metrics"
 	hertzrouter "github.com/zy84338719/ikuai-tools-service/gen/http/router"
+	routersvc "github.com/zy84338719/ikuai-tools-service/internal/app/router"
 	"github.com/zy84338719/ikuai-tools-service/internal/conf"
 	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/job"
@@ -48,6 +50,9 @@ func Bootstrap() (*server.Hertz, error) {
 	if err := initIKuaiManager(cfg); err != nil {
 		logger.Error(fmt.Sprintf("init ikuai client failed (continuing): %v", err))
 	}
+
+	// Hydrate the router registry from the DB (routers added via the API).
+	loadRoutersFromDB()
 
 	h := initServer(cfg)
 
@@ -102,6 +107,34 @@ func initRedis(cfg *conf.Config) error {
 	return redis.Init(&cfg.Redis)
 }
 
+// loadRoutersFromDB seeds the connection registry with every enabled router
+// stored in the database, so routers configured through the API survive a
+// restart. The legacy single-router config block (ikuai.Init) already
+// registered a "default" entry when a token was present.
+func loadRoutersFromDB() {
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	svc := routersvc.NewService()
+	rs, err := svc.AllForManager(ctx)
+	if err != nil {
+		logger.Error(fmt.Sprintf("load routers from DB failed: %v", err))
+		return
+	}
+	specs := make([]ikuai.RouterSpec, 0, len(rs))
+	for _, r := range rs {
+		// Skip "default" — already registered from the config block to avoid
+		// shadowing it with a stale DB copy on first run.
+		if r.Name == "default" {
+			continue
+		}
+		specs = append(specs, ikuai.RouterSpec{
+			Name: r.Name, BaseURL: r.BaseURL, Token: r.Token,
+			Insecure: r.Insecure, Timeout: r.Timeout,
+		})
+	}
+	ikuai.GetRegistry().LoadAll(specs)
+}
+
 func initServer(cfg *conf.Config) *server.Hertz {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	h := server.New(server.WithHostPorts(addr))
@@ -143,7 +176,16 @@ func registerAuthRoutes(h *server.Hertz, cfg *conf.Config) {
 }
 
 func registerIKuaiRoutes(h *server.Hertz) {
-	v1 := h.Group("/api/v1/ikuai")
+	// ── Router instance management (NOT scoped by :router_id) ──
+	routers := h.Group("/api/v1/routers")
+	routers.GET("", apihandler.ListRouters)
+	routers.GET("/:name", apihandler.GetRouter)
+	routers.POST("", apihandler.CreateRouter)
+	routers.PUT("/:name", apihandler.UpdateRouter)
+	routers.DELETE("/:name", apihandler.DeleteRouter)
+
+	// ── Per-router resources (scoped by :router_id) ──
+	v1 := h.Group("/api/v1/ikuai/:router_id")
 
 	// System
 	sys := v1.Group("/system")

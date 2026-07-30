@@ -7,14 +7,13 @@ import (
 
 	"github.com/go-co-op/gocron"
 	"github.com/zy84338719/ikuai-tools-service/internal/conf"
+	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
 )
 
 var errNoClient = errors.New("ikuai client not initialized")
 
-func itoa(n int) string {
-	return strconv.Itoa(n)
-}
+func itoa(n int) string { return strconv.Itoa(n) }
 
 type Scheduler struct {
 	cron *gocron.Scheduler
@@ -22,6 +21,8 @@ type Scheduler struct {
 
 var globalScheduler *Scheduler
 
+// Start registers the cron jobs. Each job runs once per registered router, so
+// adding a router live (without restart) makes the next tick cover it too.
 func Start(cfg *conf.JobsConfig) error {
 	tz, _ := time.LoadLocation("Local")
 	s := gocron.NewScheduler(tz)
@@ -29,10 +30,13 @@ func Start(cfg *conf.JobsConfig) error {
 
 	for i, c := range cfg.CustomISP {
 		tag := "custom-isp-" + strconv.Itoa(i+1)
+		c := c // capture
 		s = setCron(s, c.Cron, cfg.SkipStart).Name(tag).Tag(tag)
 		if _, err := s.Do(func() {
-			if err := SyncCustomISP(&c, cfg); err != nil {
-				logger.Error(tag + ": " + err.Error())
+			for _, routerID := range ikuai.GetRegistry().Names() {
+				if err := SyncCustomISP(routerID, &c, cfg); err != nil {
+					logger.Error(tag + "[" + routerID + "]: " + err.Error())
+				}
 			}
 		}); err != nil {
 			logger.Error("register job " + tag + ": " + err.Error())
@@ -42,10 +46,13 @@ func Start(cfg *conf.JobsConfig) error {
 
 	for i, c := range cfg.StreamDomain {
 		tag := "stream-domain-" + strconv.Itoa(i+1)
+		c := c // capture
 		s = setCron(s, c.Cron, cfg.SkipStart).Name(tag).Tag(tag)
 		if _, err := s.Do(func() {
-			if err := SyncStreamDomain(&c, cfg); err != nil {
-				logger.Error(tag + ": " + err.Error())
+			for _, routerID := range ikuai.GetRegistry().Names() {
+				if err := SyncStreamDomain(routerID, &c, cfg); err != nil {
+					logger.Error(tag + "[" + routerID + "]: " + err.Error())
+				}
 			}
 		}); err != nil {
 			logger.Error("register job " + tag + ": " + err.Error())
