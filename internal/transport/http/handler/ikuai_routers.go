@@ -2,13 +2,11 @@ package handler
 
 import (
 	"context"
-	"strconv"
 
 	"github.com/cloudwego/hertz/pkg/app"
 	routerapp "github.com/zy84338719/ikuai-tools-service/internal/app/router"
 	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
-	routermodel "github.com/zy84338719/ikuai-tools-service/internal/repo/db/model"
 )
 
 // ── Router instance management ────────────────────────────────────────────────
@@ -118,9 +116,3 @@ func registerRouter(ctx context.Context, name string) {
 		return
 	}
 }
-
-// itoa is a small helper for handlers that need string ids.
-func itoa(n int) string { return strconv.Itoa(n) }
-
-// (routermodel is imported to keep the generate-friendly model alias alive)
-var _ = routermodel.Router{}

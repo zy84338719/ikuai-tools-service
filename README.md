@@ -1,21 +1,71 @@
 # ikuai-tools-service
 
-> ⚠️ **重要提醒**：首次使用请务必阅读[快速开始](#快速开始)部分，需要先执行代码生成命令！
-
-基于 CloudWeGo Hertz + Kitex 的 Go 微服务脚手架模板。
-
-集成 Hz HTTP 代码生成、Kitex RPC 代码生成、SQLite/MySQL/PostgreSQL、Redis。
+> iKuai 路由器统一管理服务：多路由器管理、防火墙/分流规则编排、定时同步、Prometheus 监控、Web 管理界面。基于 [ikuai-api](../ikuai-api) v4-only SDK（仅支持 iKuai v4 + 个人 API 令牌）。
 
 ## 特性
 
-- **Hz IDL 驱动**: 使用 Proto 文件定义 HTTP API，自动生成路由和模型
-- **Kitex RPC**: 支持 Protobuf RPC 服务定义和代码生成
-- **分层架构**: gen（生成代码）/ internal（手写代码）/ configs（配置文件）清晰分离
-- **多数据库支持**: SQLite（纯 Go 无 CGO）/ MySQL / PostgreSQL
-- **Redis**: 缓存支持，封装常用操作
-- **统一响应**: 标准化的 JSON 响应格式
-- **中间件**: CORS、Recovery、Logger
-- **配置管理**: YAML 配置 + 环境变量
+- **多路由器管理**: 一套服务管理多台 iKuai，路由器配置持久化到 DB，通过 API 增删改查热生效（无需重启）
+- **RESTful 多实例 API**: 所有资源按 `/api/v1/ikuai/:router_id/...` 寻址，每台路由器资源独立
+- **鉴权与审计**: API Key 鉴权（`Authorization: Bearer` / `X-API-Key`），所有写操作记录到审计表
+- **分流自动化**: custom_isp / stream_domain 定时同步，按路由器隔离执行，执行历史持久化（变更/失败/耗时）
+- **可观测性**: 结构化日志（zap + 请求 ID 链路）、内嵌 Prometheus exporter（带 router 标签）、真实健康探针
+- **Web 管理界面**: 内嵌 `/ui`，路由器切换、规则查看、手动触发同步、路由器增删
+- **全栈技术**: CloudWeGo Hertz + GORM（SQLite/MySQL/PostgreSQL）+ Redis + gocron + zap
+
+## 快速开始
+
+```bash
+# 1. 准备配置
+cp configs/config.yaml.example configs/config.yaml
+# 编辑 configs/config.yaml：设置 auth.api_key，ikuai.token（或留空后续通过 API 添加路由器）
+
+# 2. 运行（SQLite 免外部依赖，表会自动迁移）
+make run
+# 或：CONFIG_PATH=configs/config.yaml go run ./cmd/server
+
+# 3. 访问
+#   Web 界面:  http://<host>:9997/ui
+#   健康:      http://<host>:9997/ready
+#   指标:      http://<host>:9100/metrics
+```
+
+### 添加一台路由器
+
+```bash
+# 通过 API 添加路由器（设了 auth.api_key 时带 Bearer）
+curl -X POST http://localhost:9997/api/v1/routers \
+  -H "Authorization: Bearer <your-api-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"office","base_url":"https://192.168.1.1","token":"<router-api-token>"}'
+
+# 之后所有操作带上 router_id
+curl -H "Authorization: Bearer <your-api-key>" \
+  http://localhost:9997/api/v1/ikuai/office/system/status
+```
+
+> 个人 API 令牌在路由器管理界面：**系统设置 → 个人令牌**。
+
+## 主要 API
+
+| 分组 | 路径 | 说明 |
+|------|------|------|
+| 路由器管理 | `/api/v1/routers` | CRUD（不区分 router_id） |
+| 系统监控 | `/api/v1/ikuai/:router_id/system/{status,interfaces,devices}` | CPU/内存/接口/设备 |
+| 防火墙 | `/api/v1/ikuai/:router_id/firewall/{acl,dnat,ip-group,ipv6-group,custom-isp,stream-domain,stream-ipport,conn-limit}` | 规则增删改查 |
+| 网络 | `/api/v1/ikuai/:router_id/network/{wan,lan,dhcp/*,dns/static,route/static}` | 网络配置 |
+| VPN | `/api/v1/ikuai/:router_id/vpn/{pptp,l2tp}` | VPN 客户端 |
+| 同步 | `/api/v1/ikuai/:router_id/sync/{status,custom-isp,stream-domain}` | 分流任务状态/手动触发 |
+| 鉴权 | `/api/v1/auth/login` | API Key 换 token |
+| 健康 | `/health` `/live` `/ready` `/ping` `/version` | 探针（public） |
+
+---
+
+## 项目结构（脚手架基础）
+
+基于 CloudWeGo Hertz + Kitex 的 Go 微服务脚手架模板。
+集成 Hz HTTP 代码生成、Kitex RPC 代码生成、SQLite/MySQL/PostgreSQL、Redis。
+
+### 分层架构
 
 ## 项目结构
 

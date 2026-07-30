@@ -1,16 +1,34 @@
+# ikuai-tools-service configuration example.
+# Copy to configs/config.yaml and fill in your values.
+
 server:
   host: "0.0.0.0"
   port: 9997
-  mode: "debug"
-  read_timeout: 30
+  mode: "debug"       # debug | release
+  read_timeout: 30    # seconds
   write_timeout: 30
 
 database:
-  driver: "sqlite"
+  driver: "sqlite"    # sqlite | mysql | postgres
   db_name: "ikuai-tools-service.db"
+  # For mysql / postgres:
+  # host: "localhost"
+  # port: 3306
+  # user: "root"
+  # password: ""
+  # db_name: "ikuai-tools-service"
+  # ssl_mode: "disable"
+
+# Redis is optional. If unreachable the service continues without a cache
+# (used for auth-token caching / rate limiting when present).
+redis:
+  host: "localhost"
+  port: 6379
+  password: ""
+  db: 0
 
 log:
-  level: "info"
+  level: "info"       # debug | info | warn | error
   filename: ""        # empty = stdout; set a path like "logs/app.log" for file output
   max_size: 100       # MB per file
   max_backups: 10
@@ -21,11 +39,26 @@ app:
   name: "ikuai-tools-service"
   version: "1.0.0"
 
+# ── Authentication ────────────────────────────────────────────────────────────
+# When api_key is set, every non-public request must carry
+#   Authorization: Bearer <api_key>   or   X-API-Key: <api_key>
+# Leave empty to disable auth (trusted LAN only).
+auth:
+  api_key: ""
+  realm: "ikuai-tools-service"
+
+# ── Default router (legacy single-router bootstrap) ───────────────────────────
+# If token is set, a router named "default" is registered at startup. Most
+# deployments should instead manage routers via the /api/v1/routers API (which
+# persists to the database and survives restarts). The username/password fields
+# are ignored by the v4-only SDK and kept only for backward compatibility.
 ikuai:
-  base_url: "http://<router-ip>"   # e.g. http://192.168.1.1
-  username: "<username>"            # iKuai admin username
-  password: "<password>"            # iKuai admin password
+  base_url: "https://<router-ip>"   # e.g. https://192.168.1.1
+  token: ""                         # personal API token (系统设置 → 个人令牌)
+  insecure: true                    # skip TLS verification (self-signed certs)
   timeout: 30                       # seconds per request
+  # username: ""   # deprecated (v4-only SDK)
+  # password: ""   # deprecated (v4-only SDK)
 
 metrics:
   enabled: true
@@ -33,6 +66,9 @@ metrics:
   path: "/metrics"
   port: 9100          # Prometheus exporter port (separate from the main API port)
 
+# ── Scheduled jobs ────────────────────────────────────────────────────────────
+# Each job runs once per registered router, so adding a router (via the API)
+# makes the next tick cover it automatically.
 jobs:
   skip_start: false   # true = don't run jobs immediately on startup, wait for first cron tick
   gh_proxy: ""        # GitHub proxy prefix, e.g. "https://ghproxy.com"
