@@ -1,0 +1,59 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-vet:
+    name: Build & Vet
+    runs-on: ubuntu-latest
+    steps:
+      # The service depends on ikuai-api and ikuai_exporter via local `replace`
+      # directives (../ikuai-api, ../ikuai_exporter). Check out all three repos
+      # side-by-side under the workspace so those replaces resolve exactly as
+      # they do in local development.
+      - name: Checkout tools-service
+        uses: actions/checkout@v4
+        with:
+          path: ikuai-tools-service
+
+      - name: Checkout ikuai-api (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: zy84338719/ikuai-api
+          path: ikuai-api
+
+      - name: Checkout ikuai_exporter (sibling)
+        uses: actions/checkout@v4
+        with:
+          repository: zy84338719/ikuai_exporter
+          path: ikuai_exporter
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: ikuai-tools-service/go.mod
+          cache: true
+          cache-dependency-path: |
+            ikuai-tools-service/go.sum
+            ikuai-api/go.sum
+            ikuai_exporter/go.sum
+
+      - name: Download deps
+        working-directory: ikuai-tools-service
+        run: go mod download
+
+      - name: Build
+        working-directory: ikuai-tools-service
+        run: go build ./...
+
+      - name: Vet
+        working-directory: ikuai-tools-service
+        run: go vet ./...
