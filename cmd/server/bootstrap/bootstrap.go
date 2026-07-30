@@ -1,11 +1,13 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	neturl "net/url"
 	"net/http"
 	"os"
 
+	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -15,7 +17,9 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/job"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
+	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 	"github.com/zy84338719/ikuai-tools-service/internal/repo/db"
+	"github.com/zy84338719/ikuai-tools-service/internal/repo/redis"
 	apihandler "github.com/zy84338719/ikuai-tools-service/internal/transport/http/handler"
 	"github.com/zy84338719/ikuai-tools-service/internal/transport/http/middleware"
 )
@@ -34,6 +38,11 @@ func Bootstrap() (*server.Hertz, error) {
 
 	if err := initDatabase(cfg); err != nil {
 		return nil, fmt.Errorf("init database failed: %w", err)
+	}
+
+	if err := initRedis(cfg); err != nil {
+		// Redis is optional for small deployments — warn but continue.
+		logger.Error(fmt.Sprintf("init redis failed (continuing without cache): %v", err))
 	}
 
 	if err := initIKuaiManager(cfg); err != nil {
@@ -87,18 +96,50 @@ func initIKuaiManager(cfg *conf.Config) error {
 	return ikuai.Init(&cfg.IKuai)
 }
 
+// initRedis connects to Redis. It returns an error on failure but the caller
+// treats it as non-fatal so the service still runs without a cache backend.
+func initRedis(cfg *conf.Config) error {
+	return redis.Init(&cfg.Redis)
+}
+
 func initServer(cfg *conf.Config) *server.Hertz {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	h := server.New(server.WithHostPorts(addr))
 
 	h.Use(middleware.Recovery())
-	h.Use(middleware.Logger())
+	h.Use(middleware.Logger())   // injects X-Request-ID into context
 	h.Use(middleware.CORS())
+	h.Use(middleware.Auth(cfg.Auth.APIKey)) // no-op when API key is empty
+	h.Use(middleware.Audit())               // records mutating requests
 
 	hertzrouter.GeneratedRegister(h)
 	registerIKuaiRoutes(h)
+	registerAuthRoutes(h, cfg)
 
 	return h
+}
+
+// registerAuthRoutes wires the login endpoint. With the API-key model login is
+// a simple key-verification that returns the key back for the client to use as
+// a Bearer token; it exists so the WebUI can have a login flow.
+func registerAuthRoutes(h *server.Hertz, cfg *conf.Config) {
+	if cfg.Auth.APIKey == "" {
+		return
+	}
+	h.POST("/api/v1/auth/login", func(ctx context.Context, c *app.RequestContext) {
+		var req struct {
+			APIKey string `json:"api_key"`
+		}
+		if err := c.BindAndValidate(&req); err != nil {
+			resp.BadRequest(c, err.Error())
+			return
+		}
+		if req.APIKey != cfg.Auth.APIKey {
+			resp.Unauthorized(c, "invalid api key")
+			return
+		}
+		resp.Success(c, map[string]string{"token": req.APIKey})
+	})
 }
 
 func registerIKuaiRoutes(h *server.Hertz) {
@@ -256,6 +297,7 @@ func Cleanup() {
 	if m := ikuai.Get(); m != nil {
 		m.Close()
 	}
+	_ = redis.Close()
 	logger.Sync()
 	_ = db.Close()
 }

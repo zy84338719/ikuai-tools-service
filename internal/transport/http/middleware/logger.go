@@ -6,6 +6,7 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/google/uuid"
+	"github.com/zy84338719/ikuai-tools-service/internal/pkg/ctxkey"
 	log "github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
 	"go.uber.org/zap"
 )
@@ -24,6 +25,11 @@ func Logger() app.HandlerFunc {
 			reqID = uuid.New().String()
 		}
 		c.Header(headerRequestID, reqID)
+
+		// Inject the request id into the request context so downstream
+		// handlers and jobs can correlate their logs (ctxkey.RequestID).
+		// Passing the enriched ctx to c.Next propagates it to handlers.
+		ctx = ctxkey.WithRequestID(ctx, reqID)
 
 		defer func() {
 			log.Info("HTTP",

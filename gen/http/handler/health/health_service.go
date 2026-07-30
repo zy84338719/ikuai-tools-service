@@ -9,9 +9,11 @@ import (
 
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/cloudwego/hertz/pkg/protocol/consts"
+	healthmodel "github.com/zy84338719/ikuai-tools-service/gen/http/model/health"
 	"github.com/zy84338719/ikuai-tools-service/internal/conf"
 	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
-	healthmodel "github.com/zy84338719/ikuai-tools-service/gen/http/model/health"
+	"github.com/zy84338719/ikuai-tools-service/internal/repo/db"
+	"github.com/zy84338719/ikuai-tools-service/internal/repo/redis"
 )
 
 // Health returns service health status.
@@ -27,7 +29,20 @@ func Health(ctx context.Context, c *app.RequestContext) {
 // Readiness returns whether the service is ready to handle requests.
 // @router /ready [GET]
 func Readiness(ctx context.Context, c *app.RequestContext) {
-	dbOK := true
+	// Real dependency probes (time-boxed so a slow backend can't stall kubelet).
+	pctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+	defer cancel()
+
+	dbOK := false
+	if db.DB != nil {
+		if sqlDB, err := db.DB.DB(); err == nil {
+			dbOK = sqlDB.PingContext(pctx) == nil
+		}
+	}
+	redisOK := false
+	if redis.Client != nil {
+		redisOK = redis.Client.Ping(pctx).Err() == nil
+	}
 	ikuaiOK := ikuai.Get() != nil && ikuai.Get().IsConnected()
 
 	status := "ready"
@@ -35,11 +50,16 @@ func Readiness(ctx context.Context, c *app.RequestContext) {
 	if !ikuaiOK {
 		status = "degraded"
 	}
+	// If the database is down the service cannot serve most endpoints.
+	if !dbOK {
+		status = "unavailable"
+		httpStatus = consts.StatusServiceUnavailable
+	}
 
 	resp := &healthmodel.ReadinessResp{
 		Status:   status,
 		Database: dbOK,
-		Redis:    false,
+		Redis:    redisOK,
 	}
 	c.JSON(httpStatus, resp)
 }

@@ -17,6 +17,7 @@ type Config struct {
 	IKuai    IKuaiConfig    `mapstructure:"ikuai"`
 	Metrics  MetricsConfig  `mapstructure:"metrics"`
 	Jobs     JobsConfig     `mapstructure:"jobs"`
+	Auth     AuthConfig     `mapstructure:"auth"`
 }
 
 type ServerConfig struct {
@@ -93,6 +94,15 @@ type MetricsConfig struct {
 	Namespace string `mapstructure:"namespace"`
 	Path      string `mapstructure:"path"`
 	Port      int    `mapstructure:"port"` // default 9100
+}
+
+// AuthConfig controls API authentication. When APIKey is empty the service
+// runs unauthenticated (convenient for trusted LANs); set it to require every
+// non-public request to carry Authorization: Bearer <key> or X-API-Key: <key>.
+type AuthConfig struct {
+	APIKey string `mapstructure:"api_key"` // static API key; empty = auth disabled
+	// Realm is the WWW-Authenticate realm returned on 401.
+	Realm string `mapstructure:"realm"`
 }
 
 type JobsConfig struct {
@@ -234,6 +244,7 @@ func InitWithDefault() error {
 	viper.SetDefault("metrics.namespace", "ikuai")
 	viper.SetDefault("metrics.path", "/metrics")
 	viper.SetDefault("metrics.port", 9100)
+	viper.SetDefault("auth.realm", "ikuai-tools-service")
 
 	GlobalConfig = &Config{}
 	if err := viper.Unmarshal(GlobalConfig); err != nil {

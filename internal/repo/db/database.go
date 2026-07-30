@@ -6,6 +6,7 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/zy84338719/ikuai-tools-service/internal/conf"
+	"github.com/zy84338719/ikuai-tools-service/internal/repo/db/model"
 	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
@@ -55,6 +56,13 @@ func Init(cfg *conf.DatabaseConfig) error {
 	}
 
 	zap.L().Info("Database connected successfully", zap.String("driver", cfg.Driver))
+
+	// AutoMigrate keeps the schema in sync with the models. Add new models here
+	// as they are introduced (audit logs, routers, job runs, ...).
+	if err := DB.AutoMigrate(&model.User{}, &model.AuditLog{}); err != nil {
+		return fmt.Errorf("auto-migrate: %w", err)
+	}
+
 	return nil
 }
 
