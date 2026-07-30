@@ -7,14 +7,14 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
-// GetSystemStatus returns router homepage stats (CPU, memory, uptime, version).
+// GetSystemStatus returns router monitoring stats (CPU, memory, uptime, version).
 // @router /api/v1/ikuai/system/status [GET]
 func GetSystemStatus(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c)
 	if api == nil {
 		return
 	}
-	data, err := api.System().GetHomepage(ctx)
+	data, err := api.Monitoring().GetMonitoringSystem(ctx)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
@@ -29,7 +29,7 @@ func GetInterfaces(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	data, err := api.Monitor().GetInterfaces(ctx)
+	data, err := api.Monitoring().GetMonitoringInterfacesStatus(ctx)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
@@ -44,7 +44,7 @@ func GetLanDevices(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	data, err := api.Monitor().GetLanIP(ctx)
+	data, err := api.Monitoring().GetMonitoringClientsOnline(ctx)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return

@@ -5,78 +5,68 @@ import (
 	"strconv"
 
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/zy84338719/ikuai-api/types"
+	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
-// ── WAN / LAN ─────────────────────────────────────────────────────────────────
+// ── WAN / LAN (interfaces group) ──────────────────────────────────────────────
 
-// ListWan returns all WAN interface configurations.
-// @router /api/v1/ikuai/network/wan [GET]
 func ListWan(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c)
 	if api == nil {
 		return
 	}
-	items, err := api.Network().GetWan(ctx)
+	data, err := api.Interfaces().GetInterfacesWanConfig(ctx)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// ListLan returns all LAN interface configurations.
-// @router /api/v1/ikuai/network/lan [GET]
 func ListLan(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c)
 	if api == nil {
 		return
 	}
-	items, err := api.Network().GetLan(ctx)
+	data, err := api.Interfaces().GetInterfacesLanConfig(ctx)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// ── DHCP ──────────────────────────────────────────────────────────────────────
+// ── DHCP (network group) ──────────────────────────────────────────────────────
 
-// ListDHCPLeases lists all active DHCP leases.
-// @router /api/v1/ikuai/network/dhcp/leases [GET]
 func ListDHCPLeases(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c)
 	if api == nil {
 		return
 	}
-	items, err := api.Network().GetLeases(ctx)
+	data, err := api.Network().GetNetworkDhcpClients(ctx)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// ListDHCPStatic lists all DHCP static IP bindings.
-// @router /api/v1/ikuai/network/dhcp/static [GET]
 func ListDHCPStatic(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c)
 	if api == nil {
 		return
 	}
-	items, err := api.Network().GetStaticBindings(ctx)
+	data, err := api.Network().ListNetworkDhcpStatic(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// AddDHCPStatic creates a DHCP static binding.
-// @router /api/v1/ikuai/network/dhcp/static [POST]
 func AddDHCPStatic(ctx context.Context, c *app.RequestContext) {
-	var req types.DHCPStaticAddRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -85,18 +75,16 @@ func AddDHCPStatic(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	id, err := api.Network().AddStaticBinding(ctx, &req)
+	id, err := api.Network().CreateNetworkDhcpStatic(ctx, req)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, map[string]int{"id": id})
+	resp.Success(c, map[string]int64{"id": id})
 }
 
-// EditDHCPStatic updates a DHCP static binding.
-// @router /api/v1/ikuai/network/dhcp/static [PUT]
 func EditDHCPStatic(ctx context.Context, c *app.RequestContext) {
-	var req types.DHCPStaticEditRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -105,17 +93,17 @@ func EditDHCPStatic(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.Network().EditStaticBinding(ctx, &req); err != nil {
+	if err := api.Network().UpdateNetworkDhcpStatic(ctx, req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// DeleteDHCPStatic removes a DHCP static binding by ID.
-// @router /api/v1/ikuai/network/dhcp/static/:id [DELETE]
+// DeleteDHCPStatic removes a DHCP static binding.
+// v4's dhcp-static endpoint has no DELETE verb, so we use PATCH to disable it.
 func DeleteDHCPStatic(ctx context.Context, c *app.RequestContext) {
-	id, err := strconv.Atoi(string(c.Param("id")))
+	id, err := strconv.ParseInt(string(c.Param("id")), 10, 64)
 	if err != nil {
 		resp.BadRequest(c, "invalid id")
 		return
@@ -124,7 +112,7 @@ func DeleteDHCPStatic(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.Network().DelStaticBinding(ctx, id); err != nil {
+	if err := api.Network().PatchNetworkDhcpStatic(ctx, map[string]any{"id": id, "enabled": "no"}); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
@@ -132,101 +120,96 @@ func DeleteDHCPStatic(ctx context.Context, c *app.RequestContext) {
 }
 
 // ── DNS Static ────────────────────────────────────────────────────────────────
+// dns static has no v4 REST endpoint; falls back to /Action/call (func_name
+// "dns_static"). TODO(router-verify).
 
-// ListDNSStatic lists all DNS static records.
-// @router /api/v1/ikuai/network/dns/static [GET]
 func ListDNSStatic(ctx context.Context, c *app.RequestContext) {
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	items, err := api.Network().GetDNSStatic(ctx)
+	data, err := m.ActionCall(ctx, "dns_static", "show", map[string]string{
+		"TYPE": "total,data", "limit": "0,500",
+	})
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// AddDNSStatic creates a DNS static record.
-// @router /api/v1/ikuai/network/dns/static [POST]
 func AddDNSStatic(ctx context.Context, c *app.RequestContext) {
-	var req types.DNSStaticAddRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	id, err := api.Network().AddDNSStatic(ctx, &req)
-	if err != nil {
-		resp.InternalError(c, err.Error())
-		return
-	}
-	resp.Success(c, map[string]int{"id": id})
-}
-
-// EditDNSStatic updates a DNS static record.
-// @router /api/v1/ikuai/network/dns/static [PUT]
-func EditDNSStatic(ctx context.Context, c *app.RequestContext) {
-	var req types.DNSStaticEditRequest
-	if err := c.BindAndValidate(&req); err != nil {
-		resp.BadRequest(c, err.Error())
-		return
-	}
-	api := ikuaiAPI(c)
-	if api == nil {
-		return
-	}
-	if err := api.Network().EditDNSStatic(ctx, &req); err != nil {
+	if _, err := m.ActionCall(ctx, "dns_static", "add", req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// DeleteDNSStatic removes a DNS static record by ID.
-// @router /api/v1/ikuai/network/dns/static/:id [DELETE]
+func EditDNSStatic(ctx context.Context, c *app.RequestContext) {
+	var req map[string]any
+	if err := c.BindAndValidate(&req); err != nil {
+		resp.BadRequest(c, err.Error())
+		return
+	}
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
+		return
+	}
+	if _, err := m.ActionCall(ctx, "dns_static", "edit", req); err != nil {
+		resp.InternalError(c, err.Error())
+		return
+	}
+	resp.Success(c, nil)
+}
+
 func DeleteDNSStatic(ctx context.Context, c *app.RequestContext) {
 	id, err := strconv.Atoi(string(c.Param("id")))
 	if err != nil {
 		resp.BadRequest(c, "invalid id")
 		return
 	}
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	if err := api.Network().DelDNSStatic(ctx, id); err != nil {
+	if _, err := m.ActionCall(ctx, "dns_static", "del", map[string]any{"id": strconv.Itoa(id)}); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// ── Route Static ──────────────────────────────────────────────────────────────
+// ── Route Static (routing group) ──────────────────────────────────────────────
 
-// ListRouteStatic lists all static routes.
-// @router /api/v1/ikuai/network/route/static [GET]
 func ListRouteStatic(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c)
 	if api == nil {
 		return
 	}
-	items, err := api.Network().GetRouteStatic(ctx)
+	data, err := api.Routing().ListRoutingStaticRoutes(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// AddRouteStatic creates a static route.
-// @router /api/v1/ikuai/network/route/static [POST]
 func AddRouteStatic(ctx context.Context, c *app.RequestContext) {
-	var req types.RouteStaticAddRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -235,18 +218,16 @@ func AddRouteStatic(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	id, err := api.Network().AddRouteStatic(ctx, &req)
+	id, err := api.Routing().CreateRoutingStaticRoutes(ctx, req)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, map[string]int{"id": id})
+	resp.Success(c, map[string]int64{"id": id})
 }
 
-// EditRouteStatic updates a static route.
-// @router /api/v1/ikuai/network/route/static [PUT]
 func EditRouteStatic(ctx context.Context, c *app.RequestContext) {
-	var req types.RouteStaticEditRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -255,17 +236,15 @@ func EditRouteStatic(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.Network().EditRouteStatic(ctx, &req); err != nil {
+	if err := api.Routing().UpdateRoutingStaticRoutes(ctx, req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// DeleteRouteStatic removes a static route by ID.
-// @router /api/v1/ikuai/network/route/static/:id [DELETE]
 func DeleteRouteStatic(ctx context.Context, c *app.RequestContext) {
-	id, err := strconv.Atoi(string(c.Param("id")))
+	id, err := strconv.ParseInt(string(c.Param("id")), 10, 64)
 	if err != nil {
 		resp.BadRequest(c, "invalid id")
 		return
@@ -274,7 +253,7 @@ func DeleteRouteStatic(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.Network().DelRouteStatic(ctx, id); err != nil {
+	if err := api.Routing().DeleteRoutingStaticRoutes(ctx, id); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}

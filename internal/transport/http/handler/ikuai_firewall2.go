@@ -5,51 +5,45 @@ import (
 	"strconv"
 
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/zy84338719/ikuai-api/types"
+	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
-// ── IP Group ──────────────────────────────────────────────────────────────────
+// ── IP Group (objects group, IPv4) ────────────────────────────────────────────
 
-// ListIPGroup lists all IPv4 IP group objects.
-// @router /api/v1/ikuai/firewall/ip-group [GET]
 func ListIPGroup(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c)
 	if api == nil {
 		return
 	}
-	items, err := api.Firewall().GetIPGroup(ctx)
+	data, err := api.Objects().ListObjectsIpObjects(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// ListIPv6Group lists all IPv6 group objects.
-// @router /api/v1/ikuai/firewall/ipv6-group [GET]
 func ListIPv6Group(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c)
 	if api == nil {
 		return
 	}
-	items, err := api.Firewall().GetIPv6Group(ctx)
+	data, err := api.Objects().ListObjectsIpv6Objects(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// AddIPGroup creates a new IP group.
-// @router /api/v1/ikuai/firewall/ip-group [POST]
 func AddIPGroup(ctx context.Context, c *app.RequestContext) {
-	var req types.IPGroupAddRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	if req.GroupName == "" {
+	if name, _ := req["group_name"].(string); name == "" {
 		resp.BadRequest(c, "group_name is required")
 		return
 	}
@@ -57,18 +51,16 @@ func AddIPGroup(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	id, err := api.Firewall().AddIPGroup(ctx, &req)
+	id, err := api.Objects().CreateObjectsIpObjects(ctx, req)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, map[string]int{"id": id})
+	resp.Success(c, map[string]int64{"id": id})
 }
 
-// EditIPGroup updates an existing IP group.
-// @router /api/v1/ikuai/firewall/ip-group [PUT]
 func EditIPGroup(ctx context.Context, c *app.RequestContext) {
-	var req types.IPGroupEditRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -77,15 +69,13 @@ func EditIPGroup(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.Firewall().EditIPGroup(ctx, &req); err != nil {
+	if err := api.Objects().UpdateObjectsIpObjects(ctx, req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// DeleteIPGroup deletes IP groups by comma-separated IDs.
-// @router /api/v1/ikuai/firewall/ip-group/:ids [DELETE]
 func DeleteIPGroup(ctx context.Context, c *app.RequestContext) {
 	ids, err := parseIDs(string(c.Param("ids")))
 	if err != nil {
@@ -96,91 +86,86 @@ func DeleteIPGroup(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.Firewall().DelIPGroup(ctx, ids); err != nil {
-		resp.InternalError(c, err.Error())
-		return
+	// v4 Delete takes a single id; loop over the comma-separated list.
+	for _, id := range ids {
+		if err := api.Objects().DeleteObjectsIpObjects(ctx, int64(id)); err != nil {
+			resp.InternalError(c, err.Error())
+			return
+		}
 	}
 	resp.Success(c, nil)
 }
 
 // ── Stream IP Port ────────────────────────────────────────────────────────────
+// stream_ipport has no v4 REST endpoint; falls back to /Action/call.
 
-// ListStreamIPPort lists all stream IP/port routing rules.
-// @router /api/v1/ikuai/firewall/stream-ipport [GET]
 func ListStreamIPPort(ctx context.Context, c *app.RequestContext) {
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	items, err := api.Firewall().GetStreamIPPort(ctx)
+	data, err := m.ActionCall(ctx, "stream_ipport", "show", map[string]string{
+		"TYPE": "total,data", "limit": "0,500",
+	})
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// AddStreamIPPort creates a new stream IP/port routing rule.
-// @router /api/v1/ikuai/firewall/stream-ipport [POST]
 func AddStreamIPPort(ctx context.Context, c *app.RequestContext) {
-	var req types.StreamIPPortAddRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	if req.Enabled == "" {
-		req.Enabled = "yes"
+	if req["enabled"] == nil {
+		req["enabled"] = "yes"
 	}
-	if req.Week == "" {
-		req.Week = "1234567"
-	}
-	if req.Time == "" {
-		req.Time = "00:00-23:59"
-	}
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	id, err := api.Firewall().AddStreamIPPort(ctx, &req)
-	if err != nil {
-		resp.InternalError(c, err.Error())
-		return
-	}
-	resp.Success(c, map[string]int{"id": id})
-}
-
-// EditStreamIPPort updates an existing stream IP/port rule.
-// @router /api/v1/ikuai/firewall/stream-ipport [PUT]
-func EditStreamIPPort(ctx context.Context, c *app.RequestContext) {
-	var req types.StreamIPPortEditRequest
-	if err := c.BindAndValidate(&req); err != nil {
-		resp.BadRequest(c, err.Error())
-		return
-	}
-	api := ikuaiAPI(c)
-	if api == nil {
-		return
-	}
-	if err := api.Firewall().EditStreamIPPort(ctx, &req); err != nil {
+	if _, err := m.ActionCall(ctx, "stream_ipport", "add", req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// DeleteStreamIPPort deletes stream IP/port rules by comma-separated IDs.
-// @router /api/v1/ikuai/firewall/stream-ipport/:ids [DELETE]
+func EditStreamIPPort(ctx context.Context, c *app.RequestContext) {
+	var req map[string]any
+	if err := c.BindAndValidate(&req); err != nil {
+		resp.BadRequest(c, err.Error())
+		return
+	}
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
+		return
+	}
+	if _, err := m.ActionCall(ctx, "stream_ipport", "edit", req); err != nil {
+		resp.InternalError(c, err.Error())
+		return
+	}
+	resp.Success(c, nil)
+}
+
 func DeleteStreamIPPort(ctx context.Context, c *app.RequestContext) {
 	ids, err := parseIDs(string(c.Param("ids")))
 	if err != nil {
 		resp.BadRequest(c, "invalid ids: "+err.Error())
 		return
 	}
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	if err := api.Firewall().DelStreamIPPort(ctx, ids); err != nil {
+	if _, err := m.ActionCall(ctx, "stream_ipport", "del", map[string]any{"id": joinInts(ids)}); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
@@ -188,74 +173,73 @@ func DeleteStreamIPPort(ctx context.Context, c *app.RequestContext) {
 }
 
 // ── Conn Limit ────────────────────────────────────────────────────────────────
+// conn_limit has no v4 REST endpoint; falls back to /Action/call.
+// TODO(router-verify): v4 equivalent may be security/peerconn/rules.
 
-// ListConnLimit lists all connection limit rules.
-// @router /api/v1/ikuai/firewall/conn-limit [GET]
 func ListConnLimit(ctx context.Context, c *app.RequestContext) {
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	items, err := api.Firewall().GetConnLimit(ctx)
+	data, err := m.ActionCall(ctx, "conn_limit", "show", map[string]string{
+		"TYPE": "total,data", "limit": "0,500",
+	})
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// AddConnLimit creates a connection limit rule.
-// @router /api/v1/ikuai/firewall/conn-limit [POST]
 func AddConnLimit(ctx context.Context, c *app.RequestContext) {
-	var req types.ConnLimitAddRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	id, err := api.Firewall().AddConnLimit(ctx, &req)
-	if err != nil {
-		resp.InternalError(c, err.Error())
-		return
-	}
-	resp.Success(c, map[string]int{"id": id})
-}
-
-// EditConnLimit updates an existing connection limit rule.
-// @router /api/v1/ikuai/firewall/conn-limit [PUT]
-func EditConnLimit(ctx context.Context, c *app.RequestContext) {
-	var req types.ConnLimitEditRequest
-	if err := c.BindAndValidate(&req); err != nil {
-		resp.BadRequest(c, err.Error())
-		return
-	}
-	api := ikuaiAPI(c)
-	if api == nil {
-		return
-	}
-	if err := api.Firewall().EditConnLimit(ctx, &req); err != nil {
+	if _, err := m.ActionCall(ctx, "conn_limit", "add", req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// DeleteConnLimit deletes a connection limit rule by ID.
-// @router /api/v1/ikuai/firewall/conn-limit/:id [DELETE]
+func EditConnLimit(ctx context.Context, c *app.RequestContext) {
+	var req map[string]any
+	if err := c.BindAndValidate(&req); err != nil {
+		resp.BadRequest(c, err.Error())
+		return
+	}
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
+		return
+	}
+	if _, err := m.ActionCall(ctx, "conn_limit", "edit", req); err != nil {
+		resp.InternalError(c, err.Error())
+		return
+	}
+	resp.Success(c, nil)
+}
+
 func DeleteConnLimit(ctx context.Context, c *app.RequestContext) {
 	id, err := strconv.Atoi(string(c.Param("id")))
 	if err != nil {
 		resp.BadRequest(c, "invalid id")
 		return
 	}
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	if err := api.Firewall().DelConnLimit(ctx, id); err != nil {
+	if _, err := m.ActionCall(ctx, "conn_limit", "del", map[string]any{"id": strconv.Itoa(id)}); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}

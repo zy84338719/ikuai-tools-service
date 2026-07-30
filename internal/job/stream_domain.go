@@ -2,6 +2,7 @@ package job
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -10,6 +11,19 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
 )
+
+// stream_domain has no v4 REST endpoint. Like custom_isp it falls back to the
+// legacy /Action/call RPC (func_name="stream_domain"). See the note in
+// custom_isp.go.
+// TODO(router-verify): if /Action/call is unreachable on your firmware, rework
+// this onto routing/domain-rules.
+
+// streamDomainItem mirrors one row returned by stream_domain/show.
+type streamDomainItem struct {
+	ID      int    `json:"id"`
+	Comment string `json:"comment"`
+	Domain  string `json:"domain"`
+}
 
 func SyncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) error {
 	tag := cfg.GetTag()
@@ -42,21 +56,35 @@ func syncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig
 	rows = dedupe(rows)
 
 	m := ikuai.Get()
-	if m == nil {
+	if m == nil || m.Client() == nil {
 		return errNoClient
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
-	fw := m.API().Firewall()
 
 	iface := strings.Join(cfg.Interface, ",")
 	srcAddr := cfg.SrcAddr
 
 	// --- build existing chunk map: chunkIdx -> id ---
-	items, err := fw.GetStreamDomain(ctx)
+	data, err := m.ActionCall(ctx, "stream_domain", "show", map[string]string{
+		"TYPE":  "total,data",
+		"limit": "0,500",
+	})
 	if err != nil {
 		return fmt.Errorf("stream-domain/%s: get existing: %w", tag, err)
 	}
+	var items []streamDomainItem
+	if err := json.Unmarshal(data, &items); err != nil {
+		var wrap struct {
+			Data []streamDomainItem `json:"data"`
+		}
+		if jerr := json.Unmarshal(data, &wrap); jerr == nil && len(wrap.Data) > 0 {
+			items = wrap.Data
+		} else {
+			return fmt.Errorf("stream-domain/%s: decode list: %w", tag, err)
+		}
+	}
+
 	existing := make(map[int]int) // chunkIdx -> id
 	for _, item := range items {
 		if idx := parseStreamDomainComment(item.Comment, tag); idx > 0 {
@@ -75,13 +103,26 @@ func syncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig
 		domains := strings.Join(chunk, ",")
 
 		if id, ok := existing[chunkIdx]; ok {
-			if err := fw.EditStreamDomain(ctx, id, iface, srcAddr, domains, comment); err != nil {
+			if _, err := m.ActionCall(ctx, "stream_domain", "edit", map[string]any{
+				"id":       id,
+				"enabled":  "yes",
+				"interface": iface,
+				"src_addr": srcAddr,
+				"domain":   domains,
+				"comment":  comment,
+			}); err != nil {
 				return fmt.Errorf("stream-domain/%s: edit chunk %d (id=%d): %w", tag, chunkIdx, id, err)
 			}
 			delete(existing, chunkIdx)
 			logger.Info(fmt.Sprintf("stream-domain/%s: edited chunk %d id=%d entries=%d", tag, chunkIdx, id, len(chunk)))
 		} else {
-			if _, err := fw.AddStreamDomain(ctx, cfg.Interface, chunk, srcAddr, comment); err != nil {
+			if _, err := m.ActionCall(ctx, "stream_domain", "add", map[string]any{
+				"enabled":  "yes",
+				"interface": iface,
+				"src_addr": srcAddr,
+				"domain":   domains,
+				"comment":  comment,
+			}); err != nil {
 				return fmt.Errorf("stream-domain/%s: add chunk %d: %w", tag, chunkIdx, err)
 			}
 			logger.Info(fmt.Sprintf("stream-domain/%s: added chunk %d entries=%d", tag, chunkIdx, len(chunk)))
@@ -90,7 +131,9 @@ func syncStreamDomain(cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig
 
 	// --- delete stale chunks ---
 	for idx, id := range existing {
-		if err := fw.DelStreamDomain(ctx, []int{id}); err != nil {
+		if _, err := m.ActionCall(ctx, "stream_domain", "del", map[string]any{
+			"id": fmt.Sprintf("%d", id),
+		}); err != nil {
 			logger.Error(fmt.Sprintf("stream-domain/%s: delete stale chunk %d (id=%d): %v", tag, idx, id, err))
 		} else {
 			logger.Info(fmt.Sprintf("stream-domain/%s: deleted stale chunk %d id=%d", tag, idx, id))

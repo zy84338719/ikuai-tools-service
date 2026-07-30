@@ -5,7 +5,6 @@ import (
 	"strconv"
 
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/zy84338719/ikuai-api/types"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
@@ -18,18 +17,18 @@ func ListPPTPClients(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	items, err := api.VPN().GetPPTPClients(ctx)
+	data, err := api.Vpn().ListVpnPptpClients(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
 // AddPPTPClient creates a PPTP VPN client.
 // @router /api/v1/ikuai/vpn/pptp [POST]
 func AddPPTPClient(ctx context.Context, c *app.RequestContext) {
-	var req types.PPTPClientAddRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -38,18 +37,18 @@ func AddPPTPClient(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	id, err := api.VPN().AddPPTPClient(ctx, &req)
+	id, err := api.Vpn().CreateVpnPptpClients(ctx, req)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, map[string]int{"id": id})
+	resp.Success(c, map[string]int64{"id": id})
 }
 
 // EditPPTPClient updates a PPTP VPN client.
 // @router /api/v1/ikuai/vpn/pptp [PUT]
 func EditPPTPClient(ctx context.Context, c *app.RequestContext) {
-	var req types.PPTPClientEditRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -58,7 +57,7 @@ func EditPPTPClient(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.VPN().EditPPTPClient(ctx, &req); err != nil {
+	if err := api.Vpn().UpdateVpnPptpClients(ctx, req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
@@ -68,7 +67,7 @@ func EditPPTPClient(ctx context.Context, c *app.RequestContext) {
 // DeletePPTPClient removes a PPTP VPN client by ID.
 // @router /api/v1/ikuai/vpn/pptp/:id [DELETE]
 func DeletePPTPClient(ctx context.Context, c *app.RequestContext) {
-	id, err := strconv.Atoi(string(c.Param("id")))
+	id, err := strconv.ParseInt(string(c.Param("id")), 10, 64)
 	if err != nil {
 		resp.BadRequest(c, "invalid id")
 		return
@@ -77,7 +76,7 @@ func DeletePPTPClient(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.VPN().DelPPTPClient(ctx, id); err != nil {
+	if err := api.Vpn().DeleteVpnPptpClients(ctx, id); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
@@ -93,18 +92,18 @@ func ListL2TPClients(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	items, err := api.VPN().GetL2TPClients(ctx)
+	data, err := api.Vpn().ListVpnL2TpClients(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
 // AddL2TPClient creates an L2TP VPN client.
 // @router /api/v1/ikuai/vpn/l2tp [POST]
 func AddL2TPClient(ctx context.Context, c *app.RequestContext) {
-	var req types.L2TPClientAddRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -113,18 +112,18 @@ func AddL2TPClient(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	id, err := api.VPN().AddL2TPClient(ctx, &req)
+	id, err := api.Vpn().CreateVpnL2TpClients(ctx, req)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, map[string]int{"id": id})
+	resp.Success(c, map[string]int64{"id": id})
 }
 
 // EditL2TPClient updates an L2TP VPN client.
 // @router /api/v1/ikuai/vpn/l2tp [PUT]
 func EditL2TPClient(ctx context.Context, c *app.RequestContext) {
-	var req types.L2TPClientEditRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -133,7 +132,7 @@ func EditL2TPClient(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.VPN().EditL2TPClient(ctx, &req); err != nil {
+	if err := api.Vpn().UpdateVpnL2TpClients(ctx, req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
@@ -143,7 +142,7 @@ func EditL2TPClient(ctx context.Context, c *app.RequestContext) {
 // DeleteL2TPClient removes an L2TP VPN client by ID.
 // @router /api/v1/ikuai/vpn/l2tp/:id [DELETE]
 func DeleteL2TPClient(ctx context.Context, c *app.RequestContext) {
-	id, err := strconv.Atoi(string(c.Param("id")))
+	id, err := strconv.ParseInt(string(c.Param("id")), 10, 64)
 	if err != nil {
 		resp.BadRequest(c, "invalid id")
 		return
@@ -152,7 +151,7 @@ func DeleteL2TPClient(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.VPN().DelL2TPClient(ctx, id); err != nil {
+	if err := api.Vpn().DeleteVpnL2TpClients(ctx, id); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}

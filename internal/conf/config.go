@@ -79,9 +79,13 @@ type AppConfig struct {
 
 type IKuaiConfig struct {
 	BaseURL  string `mapstructure:"base_url"`
+	Token    string `mapstructure:"token"`    // v4 REST personal API token (系统设置 → 个人令牌)
+	Insecure bool   `mapstructure:"insecure"` // skip TLS verification (default true, self-signed certs)
+	Timeout  int    `mapstructure:"timeout"`
+	// Username/Password kept for backward-compat with old config files; the v4-only
+	// SDK ignores them. If Token is empty, Init will log a warning.
 	Username string `mapstructure:"username"`
 	Password string `mapstructure:"password"`
-	Timeout  int    `mapstructure:"timeout"`
 }
 
 type MetricsConfig struct {
@@ -222,9 +226,9 @@ func InitWithDefault() error {
 	viper.SetDefault("log.compress", true)
 	viper.SetDefault("app.name", "ikuai-tools-service")
 	viper.SetDefault("app.version", "1.0.0")
-	viper.SetDefault("ikuai.base_url", "http://192.168.1.1")
-	viper.SetDefault("ikuai.username", "admin")
-	viper.SetDefault("ikuai.password", "")
+	viper.SetDefault("ikuai.base_url", "https://192.168.1.1")
+	viper.SetDefault("ikuai.token", "")
+	viper.SetDefault("ikuai.insecure", true)
 	viper.SetDefault("ikuai.timeout", 30)
 	viper.SetDefault("metrics.enabled", true)
 	viper.SetDefault("metrics.namespace", "ikuai")

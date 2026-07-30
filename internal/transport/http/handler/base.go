@@ -9,7 +9,7 @@ import (
 
 // ikuaiAPI returns the live API client or writes an error response and returns nil.
 // Pattern: api := ikuaiAPI(c); if api == nil { return }
-func ikuaiAPI(c *app.RequestContext) service.APIClient {
+func ikuaiAPI(c *app.RequestContext) *service.APIClient {
 	m := ikuai.Get()
 	if m == nil {
 		resp.InternalError(c, "ikuai client not initialized")
@@ -17,7 +17,7 @@ func ikuaiAPI(c *app.RequestContext) service.APIClient {
 	}
 	api := m.API()
 	if api == nil {
-		resp.InternalError(c, "ikuai client not connected")
+		resp.InternalError(c, "ikuai client not connected (check ikuai.token)")
 		return nil
 	}
 	return api

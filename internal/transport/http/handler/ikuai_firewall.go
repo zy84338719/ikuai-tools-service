@@ -6,25 +6,28 @@ import (
 	"strings"
 
 	"github.com/cloudwego/hertz/pkg/app"
-	"github.com/zy84338719/ikuai-api/types"
+	"github.com/zy84338719/ikuai-tools-service/internal/ikuai"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
 // ── Custom ISP ────────────────────────────────────────────────────────────────
+// custom_isp has no v4 REST endpoint; falls back to /Action/call (see
+// ikuai.Manager.ActionCall). TODO(router-verify).
 
-// ListCustomISP lists all custom ISP rules.
-// @router /api/v1/ikuai/firewall/custom-isp [GET]
 func ListCustomISP(ctx context.Context, c *app.RequestContext) {
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	items, err := api.Firewall().GetCustomISP(ctx)
+	data, err := m.ActionCall(ctx, "custom_isp", "show", map[string]string{
+		"TYPE": "total,data", "limit": "0,500",
+	})
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
 type AddCustomISPReq struct {
@@ -33,8 +36,6 @@ type AddCustomISPReq struct {
 	Comment string   `json:"comment"`
 }
 
-// AddCustomISP creates a new custom ISP rule.
-// @router /api/v1/ikuai/firewall/custom-isp [POST]
 func AddCustomISP(ctx context.Context, c *app.RequestContext) {
 	var req AddCustomISPReq
 	if err := c.BindAndValidate(&req); err != nil {
@@ -45,31 +46,32 @@ func AddCustomISP(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "name and ip_group are required")
 		return
 	}
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	count, err := api.Firewall().AddCustomISP(ctx, req.Name, req.IPGroup, req.Comment)
-	if err != nil {
+	if _, err := m.ActionCall(ctx, "custom_isp", "add", map[string]any{
+		"name": req.Name, "ipgroup": strings.Join(req.IPGroup, ","), "comment": req.Comment,
+	}); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, map[string]int{"count": count})
+	resp.Success(c, nil)
 }
 
-// DeleteCustomISP deletes custom ISP rules by comma-separated IDs.
-// @router /api/v1/ikuai/firewall/custom-isp/:ids [DELETE]
 func DeleteCustomISP(ctx context.Context, c *app.RequestContext) {
 	ids, err := parseIDs(string(c.Param("ids")))
 	if err != nil {
 		resp.BadRequest(c, "invalid ids: "+err.Error())
 		return
 	}
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	if err := api.Firewall().DelCustomISP(ctx, ids); err != nil {
+	if _, err := m.ActionCall(ctx, "custom_isp", "del", map[string]any{"id": joinInts(ids)}); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
@@ -77,20 +79,22 @@ func DeleteCustomISP(ctx context.Context, c *app.RequestContext) {
 }
 
 // ── Stream Domain ─────────────────────────────────────────────────────────────
+// stream_domain has no v4 REST endpoint; falls back to /Action/call.
 
-// ListStreamDomain lists all stream domain routing rules.
-// @router /api/v1/ikuai/firewall/stream-domain [GET]
 func ListStreamDomain(ctx context.Context, c *app.RequestContext) {
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	items, err := api.Firewall().GetStreamDomain(ctx)
+	data, err := m.ActionCall(ctx, "stream_domain", "show", map[string]string{
+		"TYPE": "total,data", "limit": "0,500",
+	})
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
 type AddStreamDomainReq struct {
@@ -100,8 +104,6 @@ type AddStreamDomainReq struct {
 	Comment   string   `json:"comment"`
 }
 
-// AddStreamDomain creates stream domain routing rules.
-// @router /api/v1/ikuai/firewall/stream-domain [POST]
 func AddStreamDomain(ctx context.Context, c *app.RequestContext) {
 	var req AddStreamDomainReq
 	if err := c.BindAndValidate(&req); err != nil {
@@ -112,58 +114,57 @@ func AddStreamDomain(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "interface and domains are required")
 		return
 	}
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	count, err := api.Firewall().AddStreamDomain(ctx, req.Interface, req.Domains, req.SrcAddr, req.Comment)
-	if err != nil {
+	if _, err := m.ActionCall(ctx, "stream_domain", "add", map[string]any{
+		"enabled": "yes", "interface": strings.Join(req.Interface, ","),
+		"src_addr": req.SrcAddr, "domain": strings.Join(req.Domains, ","), "comment": req.Comment,
+	}); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, map[string]int{"count": count})
+	resp.Success(c, nil)
 }
 
-// DeleteStreamDomain deletes stream domain rules by comma-separated IDs.
-// @router /api/v1/ikuai/firewall/stream-domain/:ids [DELETE]
 func DeleteStreamDomain(ctx context.Context, c *app.RequestContext) {
 	ids, err := parseIDs(string(c.Param("ids")))
 	if err != nil {
 		resp.BadRequest(c, "invalid ids: "+err.Error())
 		return
 	}
-	api := ikuaiAPI(c)
-	if api == nil {
+	m := ikuai.Get()
+	if m == nil || m.Client() == nil {
+		resp.InternalError(c, "ikuai client not connected")
 		return
 	}
-	if err := api.Firewall().DelStreamDomain(ctx, ids); err != nil {
+	idStr := joinInts(ids)
+	if _, err := m.ActionCall(ctx, "stream_domain", "del", map[string]any{"id": idStr}); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// ── ACL ───────────────────────────────────────────────────────────────────────
+// ── ACL (security group) ──────────────────────────────────────────────────────
 
-// ListACL lists all ACL rules.
-// @router /api/v1/ikuai/firewall/acl [GET]
 func ListACL(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c)
 	if api == nil {
 		return
 	}
-	items, err := api.Firewall().GetACL(ctx)
+	data, err := api.Security().ListSecurityAclRules(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// AddACL creates a new ACL rule.
-// @router /api/v1/ikuai/firewall/acl [POST]
 func AddACL(ctx context.Context, c *app.RequestContext) {
-	var req types.ACLAddRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -172,18 +173,16 @@ func AddACL(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	id, err := api.Firewall().AddACL(ctx, &req)
+	id, err := api.Security().CreateSecurityAclRules(ctx, req)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, map[string]int{"id": id})
+	resp.Success(c, map[string]int64{"id": id})
 }
 
-// EditACL updates an existing ACL rule.
-// @router /api/v1/ikuai/firewall/acl [PUT]
 func EditACL(ctx context.Context, c *app.RequestContext) {
-	var req types.ACLEditRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -192,17 +191,15 @@ func EditACL(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.Firewall().EditACL(ctx, &req); err != nil {
+	if err := api.Security().UpdateSecurityAclRules(ctx, req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// DeleteACL deletes an ACL rule by ID.
-// @router /api/v1/ikuai/firewall/acl/:id [DELETE]
 func DeleteACL(ctx context.Context, c *app.RequestContext) {
-	id, err := strconv.Atoi(string(c.Param("id")))
+	id, err := strconv.ParseInt(string(c.Param("id")), 10, 64)
 	if err != nil {
 		resp.BadRequest(c, "invalid id")
 		return
@@ -211,34 +208,30 @@ func DeleteACL(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.Firewall().DelACL(ctx, id); err != nil {
+	if err := api.Security().DeleteSecurityAclRules(ctx, id); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// ── DNAT ──────────────────────────────────────────────────────────────────────
+// ── DNAT (network group) ──────────────────────────────────────────────────────
 
-// ListDNAT lists all DNAT (port forwarding) rules.
-// @router /api/v1/ikuai/firewall/dnat [GET]
 func ListDNAT(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c)
 	if api == nil {
 		return
 	}
-	items, err := api.Firewall().GetDNAT(ctx)
+	data, err := api.Network().ListNetworkDnatRules(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, items)
+	resp.Success(c, data)
 }
 
-// AddDNAT creates a new DNAT rule.
-// @router /api/v1/ikuai/firewall/dnat [POST]
 func AddDNAT(ctx context.Context, c *app.RequestContext) {
-	var req types.DNATAddRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -247,18 +240,16 @@ func AddDNAT(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	id, err := api.Firewall().AddDNAT(ctx, &req)
+	id, err := api.Network().CreateNetworkDnatRules(ctx, req)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, map[string]int{"id": id})
+	resp.Success(c, map[string]int64{"id": id})
 }
 
-// EditDNAT updates an existing DNAT rule.
-// @router /api/v1/ikuai/firewall/dnat [PUT]
 func EditDNAT(ctx context.Context, c *app.RequestContext) {
-	var req types.DNATEditRequest
+	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil {
 		resp.BadRequest(c, err.Error())
 		return
@@ -267,17 +258,15 @@ func EditDNAT(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.Firewall().EditDNAT(ctx, &req); err != nil {
+	if err := api.Network().UpdateNetworkDnatRules(ctx, req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
 	resp.Success(c, nil)
 }
 
-// DeleteDNAT deletes a DNAT rule by ID.
-// @router /api/v1/ikuai/firewall/dnat/:id [DELETE]
 func DeleteDNAT(ctx context.Context, c *app.RequestContext) {
-	id, err := strconv.Atoi(string(c.Param("id")))
+	id, err := strconv.ParseInt(string(c.Param("id")), 10, 64)
 	if err != nil {
 		resp.BadRequest(c, "invalid id")
 		return
@@ -286,7 +275,7 @@ func DeleteDNAT(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	if err := api.Firewall().DelDNAT(ctx, id); err != nil {
+	if err := api.Network().DeleteNetworkDnatRules(ctx, id); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
@@ -313,4 +302,13 @@ func parseIDs(s string) ([]int, error) {
 		ids = append(ids, n)
 	}
 	return ids, nil
+}
+
+// joinInts returns a comma-separated string of ints, e.g. [1,2,3] -> "1,2,3".
+func joinInts(ids []int) string {
+	parts := make([]string, len(ids))
+	for i, id := range ids {
+		parts[i] = strconv.Itoa(id)
+	}
+	return strings.Join(parts, ",")
 }
