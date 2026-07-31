@@ -57,9 +57,8 @@ func Init(cfg *conf.DatabaseConfig) error {
 
 	zap.L().Info("Database connected successfully", zap.String("driver", cfg.Driver))
 
-	// AutoMigrate keeps the schema in sync with the models. Add new models here
-	// as they are introduced (audit logs, routers, job runs, ...).
-	if err := DB.AutoMigrate(&model.User{}, &model.AuditLog{}, &model.Router{}, &model.JobRun{}); err != nil {
+	// AutoMigrate keeps the schema in sync with the models.
+	if err := DB.AutoMigrate(&model.AuditLog{}, &model.Router{}, &model.JobRun{}); err != nil {
 		return fmt.Errorf("auto-migrate: %w", err)
 	}
 

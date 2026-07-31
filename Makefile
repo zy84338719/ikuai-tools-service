@@ -1,10 +1,14 @@
 .PHONY: build run test clean docker-build docker-run lint gen-http-new gen-http-update gen-http-update-all gen-http-init gen-rpc gen-rpc-all kitex-install hz-install
 
-APP_NAME={{.project_name}}
-MODULE_NAME={{.module_name}}
+APP_NAME=ikuai-tools-service
+SERVER_PORT=9997
+METRICS_PORT=9100
 MAIN_PATH=./cmd/server
 IDL_PATH=idl
 GEN_SCRIPT=./scripts/gen.sh
+# The Dockerfile expects the monorepo root as context (it COPYs the sibling
+# ikuai-api/ and ikuai_exporter/ repos for the local replace directives).
+MONOREPO_ROOT=..
 
 # ===== 构建与运行 =====
 
@@ -34,12 +38,14 @@ fmt:
 	go fmt ./...
 
 # ===== Docker =====
+# Build from the monorepo root so the Dockerfile can COPY the sibling
+# ikuai-api/ and ikuai_exporter/ repos (needed by the local replace directives).
 
 docker-build:
-	docker build -t $(APP_NAME):latest .
+	docker build -t $(APP_NAME):latest -f Dockerfile $(MONOREPO_ROOT)
 
 docker-run:
-	docker run -p {{.server_port}}:{{.server_port}} $(APP_NAME):latest
+	docker run -p $(SERVER_PORT):$(SERVER_PORT) -p $(METRICS_PORT):$(METRICS_PORT) $(APP_NAME):latest
 
 # ===== Hz HTTP 代码生成 (生成到 gen/http/) =====
 

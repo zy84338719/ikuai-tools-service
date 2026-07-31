@@ -140,8 +140,8 @@ func initServer(cfg *conf.Config) *server.Hertz {
 	h := server.New(server.WithHostPorts(addr))
 
 	h.Use(middleware.Recovery())
-	h.Use(middleware.Logger())   // injects X-Request-ID into context
-	h.Use(middleware.CORS())
+	h.Use(middleware.Logger())              // injects X-Request-ID into context
+	h.Use(middleware.CORS(cfg.Server.CORSOrigins))
 	h.Use(middleware.Auth(cfg.Auth.APIKey)) // no-op when API key is empty
 	h.Use(middleware.Audit())               // records mutating requests
 

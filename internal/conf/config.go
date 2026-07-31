@@ -23,9 +23,13 @@ type Config struct {
 type ServerConfig struct {
 	Host         string `mapstructure:"host"`
 	Port         int    `mapstructure:"port"`
-	Mode         string `mapstructure:"mode"`
+	Mode         string `mapstructure:"mode"` // "release" | "debug"
 	ReadTimeout  int    `mapstructure:"read_timeout"`
 	WriteTimeout int    `mapstructure:"write_timeout"`
+	// CORSOrigins is a comma-separated allowlist for the Access-Control-Allow-
+	// Origin response header. "*" (the default) allows any origin — fine for a
+	// trusted LAN but should be narrowed for any non-isolated deployment.
+	CORSOrigins []string `mapstructure:"cors_origins"`
 }
 
 type DatabaseConfig struct {
@@ -192,6 +196,12 @@ func (c *Config) Validate() error {
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("server.port %d is out of range (1-65535)", c.Server.Port)
 	}
+	// In release mode the API exposes mutating endpoints (router CRUD, rule
+	// edits, sync triggers), so an empty API key is rejected to avoid leaving
+	// the service open. Debug mode keeps the no-auth default for convenience.
+	if c.Server.Mode == "release" && c.Auth.APIKey == "" {
+		return fmt.Errorf("auth.api_key is required in release mode (set a key, or use mode: debug to allow no-auth)")
+	}
 	if c.IKuai.BaseURL != "" {
 		if u, err := url.Parse(c.IKuai.BaseURL); err != nil || !strings.HasPrefix(u.Scheme, "http") {
 			return fmt.Errorf("ikuai.base_url %q is not a valid HTTP URL", c.IKuai.BaseURL)
@@ -222,6 +232,7 @@ func InitWithDefault() error {
 	viper.SetDefault("server.mode", "debug")
 	viper.SetDefault("server.read_timeout", 30)
 	viper.SetDefault("server.write_timeout", 30)
+	// cors_origins defaults to empty (= allow any); set in config to narrow.
 	viper.SetDefault("database.driver", "mysql")
 	viper.SetDefault("database.host", "localhost")
 	viper.SetDefault("database.port", 3306)

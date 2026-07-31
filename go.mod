@@ -11,14 +11,16 @@ require (
 	github.com/zy84338719/ikuai-api v1.0.1
 	github.com/zy84338719/ikuai_exporter v0.0.0
 	go.uber.org/zap v1.27.0
-	golang.org/x/crypto v0.46.0
 	google.golang.org/protobuf v1.36.8
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/driver/postgres v1.5.11
 	gorm.io/gorm v1.25.12
 )
 
-require go.yaml.in/yaml/v2 v2.4.2 // indirect
+require (
+	go.yaml.in/yaml/v2 v2.4.2 // indirect
+	golang.org/x/crypto v0.46.0 // indirect
+)
 
 replace (
 	github.com/zy84338719/ikuai-api => ../ikuai-api

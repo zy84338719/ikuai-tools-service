@@ -4,9 +4,13 @@
 server:
   host: "0.0.0.0"
   port: 9997
-  mode: "debug"       # debug | release
+  mode: "debug"       # debug | release (release mode requires auth.api_key)
   read_timeout: 30    # seconds
   write_timeout: 30
+  # CORS allowlist for the browser UI. Empty (default) = allow any origin
+  # (fine for a trusted LAN). For any non-isolated deployment, list the exact
+  # origins allowed, e.g. ["https://ikuai.example.com"].
+  cors_origins: []
 
 database:
   driver: "sqlite"    # sqlite | mysql | postgres

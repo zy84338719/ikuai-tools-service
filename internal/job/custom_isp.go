@@ -32,27 +32,41 @@ type customISPItem struct {
 }
 
 // SyncCustomISP runs the custom-isp sync against one router. The scheduler
-// calls this once per registered router.
+// calls this once per registered router. Every execution (success, partial, or
+// failed) is persisted to job_runs.
 func SyncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) error {
 	tag := cfg.GetTag()
 	name := "custom-isp/" + tag
 	markRunning(routerID, name)
-	err := syncCustomISP(routerID, cfg, jobsCfg)
+	start := time.Now()
+	changed, failed, err := syncCustomISP(routerID, cfg, jobsCfg)
 	markDone(routerID, name, err)
+
+	// Persist outcome to job_runs. status reflects whether the job ran to
+	// completion: "failed" on a hard error, "partial" if some chunks errored,
+	// "success" otherwise.
+	status := "success"
+	errMsg := ""
+	if err != nil {
+		status = "failed"
+		errMsg = err.Error()
+	} else if failed > 0 {
+		status = "partial"
+	}
+	recordRun(routerID, "custom-isp", tag, status, changed, failed, time.Since(start), errMsg)
 	return err
 }
 
-func syncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) error {
-	start := time.Now()
+func syncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) (changed, failed int, err error) {
 	tag := cfg.GetTag()
 	tagName := buildTagName(tag)
 
 	// --- fetch ---
 	var rows []string
 	for _, u := range cfg.Url {
-		lines, err := fetchLines(u, jobsCfg.GhProxy)
-		if err != nil {
-			logger.Error(fmt.Sprintf("custom-isp/%s[%s]: fetch %s failed: %v", tag, routerID, u, err))
+		lines, ferr := fetchLines(u, jobsCfg.GhProxy)
+		if ferr != nil {
+			logger.Error(fmt.Sprintf("custom-isp/%s[%s]: fetch %s failed: %v", tag, routerID, u, ferr))
 			continue
 		}
 		logger.Info(fmt.Sprintf("custom-isp/%s[%s]: fetched %s rows=%d", tag, routerID, u, len(lines)))
@@ -60,13 +74,13 @@ func syncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf
 	}
 	if len(rows) == 0 {
 		logger.Info(fmt.Sprintf("custom-isp/%s[%s]: no rows fetched, skipping", tag, routerID))
-		return nil
+		return 0, 0, nil
 	}
 	rows = dedupe(rows)
 
 	m := ikuai.GetRegistry().Get(routerID)
 	if m == nil || m.Client() == nil {
-		return errNoClient
+		return 0, 0, errNoClient
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -77,7 +91,7 @@ func syncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf
 		"limit": "0,500",
 	})
 	if err != nil {
-		return fmt.Errorf("custom-isp/%s: get existing: %w", tag, err)
+		return 0, 0, fmt.Errorf("custom-isp/%s: get existing: %w", tag, err)
 	}
 	var items []customISPItem
 	if err := json.Unmarshal(data, &items); err != nil {
@@ -88,7 +102,7 @@ func syncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf
 		if jerr := json.Unmarshal(data, &wrap); jerr == nil && len(wrap.Data) > 0 {
 			items = wrap.Data
 		} else {
-			return fmt.Errorf("custom-isp/%s: decode list: %w", tag, err)
+			return 0, 0, fmt.Errorf("custom-isp/%s: decode list: %w", tag, err)
 		}
 	}
 
@@ -107,7 +121,6 @@ func syncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf
 	chunks := splitChunks(rows, chunkSize)
 	logger.Info(fmt.Sprintf("custom-isp/%s[%s]: %d rows → %d chunks (max %d each)", tag, routerID, len(rows), len(chunks), chunkSize))
 
-	var changed, failed int
 	for i, chunk := range chunks {
 		chunkIdx := i + 1
 		comment := buildChunkComment(chunkIdx)
@@ -155,13 +168,7 @@ func syncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf
 		}
 	}
 
-	dur := time.Since(start)
-	status := "success"
-	if failed > 0 {
-		status = "partial"
-	}
-	recordRun(routerID, "custom-isp", tag, status, changed, failed, dur, "")
-	logger.Info(fmt.Sprintf("custom-isp/%s[%s]: done total=%d chunks=%d changed=%d failed=%d duration=%s",
-		tag, routerID, len(rows), len(chunks), changed, failed, dur))
-	return nil
+	logger.Info(fmt.Sprintf("custom-isp/%s[%s]: done total=%d chunks=%d changed=%d failed=%d",
+		tag, routerID, len(rows), len(chunks), changed, failed))
+	return changed, failed, nil
 }

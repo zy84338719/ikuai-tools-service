@@ -25,18 +25,29 @@ type streamDomainItem struct {
 	Domain  string `json:"domain"`
 }
 
-// SyncStreamDomain runs the stream-domain sync against one router.
+// SyncStreamDomain runs the stream-domain sync against one router. Every
+// execution (success, partial, or failed) is persisted to job_runs.
 func SyncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) error {
 	tag := cfg.GetTag()
 	name := "stream-domain/" + tag
 	markRunning(routerID, name)
-	err := syncStreamDomain(routerID, cfg, jobsCfg)
+	start := time.Now()
+	changed, failed, err := syncStreamDomain(routerID, cfg, jobsCfg)
 	markDone(routerID, name, err)
+
+	status := "success"
+	errMsg := ""
+	if err != nil {
+		status = "failed"
+		errMsg = err.Error()
+	} else if failed > 0 {
+		status = "partial"
+	}
+	recordRun(routerID, "stream-domain", tag, status, changed, failed, time.Since(start), errMsg)
 	return err
 }
 
-func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) error {
-	start := time.Now()
+func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) (changed, failed int, err error) {
 	tag := cfg.GetTag()
 
 	// --- fetch ---
@@ -52,13 +63,13 @@ func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg
 	}
 	if len(rows) == 0 {
 		logger.Info(fmt.Sprintf("stream-domain/%s[%s]: no rows fetched, skipping", tag, routerID))
-		return nil
+		return 0, 0, nil
 	}
 	rows = dedupe(rows)
 
 	m := ikuai.GetRegistry().Get(routerID)
 	if m == nil || m.Client() == nil {
-		return errNoClient
+		return 0, 0, errNoClient
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
@@ -72,7 +83,7 @@ func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg
 		"limit": "0,500",
 	})
 	if err != nil {
-		return fmt.Errorf("stream-domain/%s[%s]: get existing: %w", tag, routerID, err)
+		return 0, 0, fmt.Errorf("stream-domain/%s[%s]: get existing: %w", tag, routerID, err)
 	}
 	var items []streamDomainItem
 	if err := json.Unmarshal(data, &items); err != nil {
@@ -82,7 +93,7 @@ func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg
 		if jerr := json.Unmarshal(data, &wrap); jerr == nil && len(wrap.Data) > 0 {
 			items = wrap.Data
 		} else {
-			return fmt.Errorf("stream-domain/%s[%s]: decode list: %w", tag, routerID, err)
+			return 0, 0, fmt.Errorf("stream-domain/%s[%s]: decode list: %w", tag, routerID, err)
 		}
 	}
 
@@ -98,7 +109,6 @@ func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg
 	chunks := splitChunks(rows, chunkSize)
 	logger.Info(fmt.Sprintf("stream-domain/%s[%s]: %d rows → %d chunks (max %d each)", tag, routerID, len(rows), len(chunks), chunkSize))
 
-	var changed, failed int
 	for i, chunk := range chunks {
 		chunkIdx := i + 1
 		comment := buildStreamDomainComment(tag, chunkIdx)
@@ -150,13 +160,7 @@ func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg
 		}
 	}
 
-	dur := time.Since(start)
-	status := "success"
-	if failed > 0 {
-		status = "partial"
-	}
-	recordRun(routerID, "stream-domain", tag, status, changed, failed, dur, "")
-	logger.Info(fmt.Sprintf("stream-domain/%s[%s]: done total=%d chunks=%d changed=%d failed=%d duration=%s",
-		tag, routerID, len(rows), len(chunks), changed, failed, dur))
-	return nil
+	logger.Info(fmt.Sprintf("stream-domain/%s[%s]: done total=%d chunks=%d changed=%d failed=%d",
+		tag, routerID, len(rows), len(chunks), changed, failed))
+	return changed, failed, nil
 }
