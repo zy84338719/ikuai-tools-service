@@ -39,7 +39,9 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version-file: ikuai-tools-service/go.mod
+          # Pin to a Go version known to link cleanly with the sonic version in
+          # the dependency tree (older 1.24.x hits runtime.lastmoduledatap).
+          go-version: '1.25'
           cache: true
           cache-dependency-path: |
             ikuai-tools-service/go.sum
