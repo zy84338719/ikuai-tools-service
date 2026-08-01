@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strings"
 	"time"
 
 	"github.com/zy84338719/ikuai-tools-service/internal/conf"
@@ -12,45 +11,57 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
 )
 
-// stream_domain's v3 /Action/call RPC is gone in iKuai v4 (404). A v4
-// equivalent exists at routing/domain-rules, but its field model differs from
-// the v3 stream_domain sync (which chunks domains into multiple records), so
-// the migration is tracked separately. For now this job fails fast with
-// errV4ActionCallGone so the limitation shows up in job_runs.
+// stream_domain is implemented on v4 routing/domain-rules. The v3 /Action/call
+// RPC is gone (404 on iKuai v4). Each chunk becomes a domain-rules record:
+// tagname=<tagName>-<idx>, domain.custom=[domains], interface=<egress>.
+// Verified against iKuai 4.0.303.
 
-// streamDomainItem mirrors one row returned by stream_domain/show.
-type streamDomainItem struct {
-	ID      int    `json:"id"`
-	Comment string `json:"comment"`
-	Domain  string `json:"domain"`
+// domainRule mirrors one row of /routing/domain-rules[data].
+type domainRule struct {
+	ID        int64          `json:"id"`
+	Tagname   string         `json:"tagname"`
+	Interface string         `json:"interface"`
+	Comment   string         `json:"comment"`
+	Domain    domainRuleSet  `json:"domain"`
+	Enabled   string         `json:"enabled"`
+}
+// domainRuleSet is the {custom:[],object:{}} shape used by domain/src_addr.
+type domainRuleSet struct {
+	Custom []string `json:"custom"`
 }
 
-// SyncStreamDomain runs the stream-domain sync against one router. Every
-// execution is persisted to job_runs.
-//
-// NOTE: fails fast on v4 (see package note); will be reworked onto
-// routing/domain-rules in a follow-up.
+// SyncStreamDomain runs the stream-domain sync against one router, mapping
+// onto v4 domain-rules.
 func SyncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) error {
 	tag := cfg.GetTag()
 	name := "stream-domain/" + tag
 	markRunning(routerID, name)
 	start := time.Now()
-	err := errV4ActionCallGone
+	changed, failed, err := syncStreamDomain(routerID, cfg, jobsCfg)
 	markDone(routerID, name, err)
-	recordRun(routerID, "stream-domain", tag, "failed", 0, 0, time.Since(start), err.Error())
-	logger.Error(fmt.Sprintf("stream-domain/%s[%s]: %v", tag, routerID, err))
+
+	status := "success"
+	errMsg := ""
+	if err != nil {
+		status = "failed"
+		errMsg = err.Error()
+	} else if failed > 0 {
+		status = "partial"
+	}
+	recordRun(routerID, "stream-domain", tag, status, changed, failed, time.Since(start), errMsg)
 	return err
 }
 
 func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) (changed, failed int, err error) {
 	tag := cfg.GetTag()
+	tagName := buildTagName(tag)
 
 	// --- fetch ---
 	var rows []string
 	for _, u := range cfg.Url {
-		lines, err := fetchLines(u, jobsCfg.GhProxy)
-		if err != nil {
-			logger.Error(fmt.Sprintf("stream-domain/%s[%s]: fetch %s failed: %v", tag, routerID, u, err))
+		lines, ferr := fetchLines(u, jobsCfg.GhProxy)
+		if ferr != nil {
+			logger.Error(fmt.Sprintf("stream-domain/%s[%s]: fetch %s failed: %v", tag, routerID, u, ferr))
 			continue
 		}
 		logger.Info(fmt.Sprintf("stream-domain/%s[%s]: fetched %s rows=%d", tag, routerID, u, len(lines)))
@@ -66,36 +77,38 @@ func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg
 	if m == nil || m.Client() == nil {
 		return 0, 0, errNoClient
 	}
+	api := m.API()
+	if api == nil {
+		return 0, 0, errNoClient
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
-	iface := strings.Join(cfg.Interface, ",")
-	srcAddr := cfg.SrcAddr
+	// v4 domain-rules interface is a single egress iface string.
+	iface := ""
+	if len(cfg.Interface) > 0 {
+		iface = cfg.Interface[0]
+	}
 
-	// --- build existing chunk map: chunkIdx -> id ---
-	data, err := m.ActionCall(ctx, "stream_domain", "show", map[string]string{
-		"TYPE":  "total,data",
-		"limit": "0,500",
-	})
+	// --- existing chunk map: chunkIdx -> domain-rules id ---
+	raw, err := api.Routing().ListRoutingDomainRules(ctx, nil)
 	if err != nil {
-		return 0, 0, fmt.Errorf("stream-domain/%s[%s]: get existing: %w", tag, routerID, err)
+		return 0, 0, fmt.Errorf("stream-domain/%s[%s]: list domain-rules: %w", tag, routerID, err)
 	}
-	var items []streamDomainItem
-	if err := json.Unmarshal(data, &items); err != nil {
-		var wrap struct {
-			Data []streamDomainItem `json:"data"`
-		}
-		if jerr := json.Unmarshal(data, &wrap); jerr == nil && len(wrap.Data) > 0 {
-			items = wrap.Data
-		} else {
-			return 0, 0, fmt.Errorf("stream-domain/%s[%s]: decode list: %w", tag, routerID, err)
-		}
+	var list struct {
+		Data []domainRule `json:"data"`
 	}
-
-	existing := make(map[int]int) // chunkIdx -> id
-	for _, item := range items {
-		if idx := parseStreamDomainComment(item.Comment, tag); idx > 0 {
-			existing[idx] = item.ID
+	if err := json.Unmarshal(raw, &list); err != nil {
+		return 0, 0, fmt.Errorf("stream-domain/%s[%s]: decode domain-rules: %w", tag, routerID, err)
+	}
+	existing := make(map[int]int64) // chunkIdx -> id
+	for _, r := range list.Data {
+		idx := chunkIndexOfName(r.Tagname, tagName)
+		if idx <= 0 {
+			idx = parseStreamDomainComment(r.Comment, tag)
+		}
+		if idx > 0 {
+			existing[idx] = r.ID
 		}
 	}
 
@@ -106,18 +119,22 @@ func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg
 
 	for i, chunk := range chunks {
 		chunkIdx := i + 1
+		tagname := fmt.Sprintf("%s-%d", tagName, chunkIdx)
 		comment := buildStreamDomainComment(tag, chunkIdx)
-		domains := strings.Join(chunk, ",")
+		body := map[string]any{
+			"enabled":   "yes",
+			"tagname":   tagname,
+			"interface": iface,
+			"src_addr":  cfg.SrcAddr,
+			"domain":    map[string]any{"custom": chunk, "object": map[string]any{}},
+			"prio":      31,
+			"time":      "",
+			"comment":   comment,
+		}
 
 		if id, ok := existing[chunkIdx]; ok {
-			if _, err := m.ActionCall(ctx, "stream_domain", "edit", map[string]any{
-				"id":        id,
-				"enabled":   "yes",
-				"interface": iface,
-				"src_addr":  srcAddr,
-				"domain":    domains,
-				"comment":   comment,
-			}); err != nil {
+			body["id"] = id
+			if err := api.Routing().UpdateRoutingDomainRules(ctx, body); err != nil {
 				failed++
 				logger.Error(fmt.Sprintf("stream-domain/%s[%s]: edit chunk %d (id=%d): %v", tag, routerID, chunkIdx, id, err))
 				continue
@@ -126,13 +143,7 @@ func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg
 			changed++
 			logger.Info(fmt.Sprintf("stream-domain/%s[%s]: edited chunk %d id=%d entries=%d", tag, routerID, chunkIdx, id, len(chunk)))
 		} else {
-			if _, err := m.ActionCall(ctx, "stream_domain", "add", map[string]any{
-				"enabled":   "yes",
-				"interface": iface,
-				"src_addr":  srcAddr,
-				"domain":    domains,
-				"comment":   comment,
-			}); err != nil {
+			if _, err := api.Routing().CreateRoutingDomainRules(ctx, body); err != nil {
 				failed++
 				logger.Error(fmt.Sprintf("stream-domain/%s[%s]: add chunk %d: %v", tag, routerID, chunkIdx, err))
 				continue
@@ -144,9 +155,7 @@ func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg
 
 	// --- delete stale chunks ---
 	for idx, id := range existing {
-		if _, err := m.ActionCall(ctx, "stream_domain", "del", map[string]any{
-			"id": fmt.Sprintf("%d", id),
-		}); err != nil {
+		if err := api.Routing().DeleteRoutingDomainRules(ctx, id); err != nil {
 			failed++
 			logger.Error(fmt.Sprintf("stream-domain/%s[%s]: delete stale chunk %d (id=%d): %v", tag, routerID, idx, id, err))
 		} else {
@@ -155,7 +164,7 @@ func syncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg
 		}
 	}
 
-	logger.Info(fmt.Sprintf("stream-domain/%s[%s]: done total=%d chunks=%d changed=%d failed=%d",
+	logger.Info(fmt.Sprintf("stream-domain/%s[%s]: done rows=%d chunks=%d changed=%d failed=%d",
 		tag, routerID, len(rows), len(chunks), changed, failed))
 	return changed, failed, nil
 }

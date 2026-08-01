@@ -131,11 +131,21 @@ func AddStreamDomain(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
+	// v4 domain-rules field shape (verified on iKuai 4.0.303):
+	// interface is a single egress iface string; domain is {custom:[...],object:{}};
+	// prio defaults to 31; comment is required on update.
+	iface := req.Interface[0]
+	if req.Comment == "" {
+		req.Comment = "ikuai-tools"
+	}
 	id, err := api.Routing().CreateRoutingDomainRules(ctx, map[string]any{
 		"enabled":   "yes",
-		"interface": strings.Join(req.Interface, ","),
+		"tagname":   "ikb_" + iface,
+		"interface": iface,
 		"src_addr":  req.SrcAddr,
-		"domain":    strings.Join(req.Domains, ","),
+		"domain":    map[string]any{"custom": req.Domains, "object": map[string]any{}},
+		"prio":      31,
+		"time":      "",
 		"comment":   req.Comment,
 	})
 	if err != nil {
