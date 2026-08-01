@@ -47,16 +47,25 @@ curl -H "Authorization: Bearer <your-api-key>" \
 
 ## 主要 API
 
+> 以下路径均省略 `/api/v1/ikuai/:router_id` 前缀。除标注只读外，均为完整 CRUD。
+
 | 分组 | 路径 | 说明 |
 |------|------|------|
-| 路由器管理 | `/api/v1/routers` | CRUD（不区分 router_id） |
-| 系统监控 | `/api/v1/ikuai/:router_id/system/{status,interfaces,devices}` | CPU/内存/接口/设备 |
-| 防火墙 | `/api/v1/ikuai/:router_id/firewall/{acl,dnat,ip-group,ipv6-group,custom-isp,stream-domain,stream-ipport,conn-limit}` | 规则增删改查 |
-| 网络 | `/api/v1/ikuai/:router_id/network/{wan,lan,dhcp/*,dns/static,route/static}` | 网络配置 |
-| VPN | `/api/v1/ikuai/:router_id/vpn/{pptp,l2tp}` | VPN 客户端 |
-| 同步 | `/api/v1/ikuai/:router_id/sync/{status,custom-isp,stream-domain}` | 分流任务状态/手动触发 |
+| **路由器管理** | `/api/v1/routers` | CRUD（不区分 router_id） |
+| **系统监控** | `monitoring/{interfaces-traffic,downstream,switch,network,app-traffic-summary,clients-traffic-summary}` | 流量/拓扑（只读） |
+| **系统状态** | `system/{status,interfaces,devices}` | CPU/内存/接口/设备（只读） |
+| **系统运维** | `system/{backup,upgrade,reboot,remote-access,disks,web-admin}` | 备份恢复/固件升级/定时重启/远程访问/磁盘/账号 |
+| **日志** | `log/{notice,system,auth,dhcp,pppoe,arp,ddns,web-activity,wireless}` | 9 类设备日志（只读） |
+| **防火墙** | `firewall/{acl,dnat,ip-group,ipv6-group,mac-objects,custom-isp,stream-domain,stream-ipport,conn-limit,mac-rules}` | 规则增删改查 |
+| **对象组** | `objects/{mac,domain,port,protocol,time}` | 对象组 CRUD（ACL/分流规则引用底座） |
+| **网络** | `network/{wan,lan,dhcp/*,dns/static,route/static,dmz,nat,qos/ip,qos/mac,vlan}` | 网络配置 |
+| **VPN** | `vpn/{pptp,l2tp}` | VPN 客户端 |
+| **多WAN/分流** | `routing/{load-balance,app-protocols}` | 负载均衡/应用分流 |
+| **同步任务** | `sync/{status,custom-isp,stream-domain}` | 分流任务状态/手动触发 |
 | 鉴权 | `/api/v1/auth/login` | API Key 换 token |
 | 健康 | `/health` `/live` `/ready` `/ping` `/version` | 探针（public） |
+
+覆盖 SDK 151 个端点中的 ~90 个，横跨全部 12 个分组。
 
 ---
 
