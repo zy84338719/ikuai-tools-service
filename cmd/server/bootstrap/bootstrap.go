@@ -280,6 +280,94 @@ func registerIKuaiRoutes(h *server.Hertz) {
 	vpn.PUT("/l2tp", apihandler.EditL2TPClient)
 	vpn.DELETE("/l2tp/:id", apihandler.DeleteL2TPClient)
 
+	// Logs (read-only)
+	logs := v1.Group("/log")
+	logs.GET("/notice", apihandler.ListLogNotice)
+	logs.GET("/system", apihandler.ListLogSystem)
+	logs.GET("/auth", apihandler.ListLogAuth)
+	logs.GET("/dhcp", apihandler.ListLogDhcp)
+	logs.GET("/pppoe", apihandler.ListLogPppoe)
+	logs.GET("/arp", apihandler.ListLogArp)
+	logs.GET("/ddns", apihandler.ListLogDdns)
+	logs.GET("/web-activity", apihandler.ListLogWebActivity)
+	logs.GET("/wireless", apihandler.ListLogWireless)
+
+	// System ops — backup
+	bk := v1.Group("/system/backup")
+	bk.GET("", apihandler.ListBackup)
+	bk.POST("", apihandler.CreateBackup)
+	bk.DELETE("/:id", apihandler.DeleteBackup)
+	v1.POST("/system/backup/restore", apihandler.RestoreBackup)
+	// System ops — upgrade
+	v1.GET("/system/upgrade", apihandler.ListUpgrade)
+	v1.POST("/system/upgrade/check", apihandler.CheckUpgrade)
+	v1.POST("/system/upgrade/start", apihandler.StartUpgrade)
+	v1.GET("/system/upgrade/status", apihandler.GetUpgradeStatus)
+	// System ops — reboot schedules
+	rb := v1.Group("/system/reboot")
+	rb.GET("", apihandler.ListRebootSchedules)
+	rb.POST("", apihandler.AddRebootSchedule)
+	rb.PUT("", apihandler.EditRebootSchedule)
+	rb.DELETE("/:id", apihandler.DeleteRebootSchedule)
+	// System ops — remote access / disks / admin accounts
+	v1.GET("/system/remote-access", apihandler.GetRemoteAccess)
+	v1.PUT("/system/remote-access", apihandler.UpdateRemoteAccess)
+	v1.GET("/system/disks", apihandler.GetDisks)
+	wa := v1.Group("/system/web-admin")
+	wa.GET("", apihandler.ListWebAdminAccounts)
+	wa.POST("", apihandler.AddWebAdminAccount)
+	wa.DELETE("/:id", apihandler.DeleteWebAdminAccount)
+
+	// Network — DMZ
+	dmz := net.Group("/dmz")
+	dmz.GET("", apihandler.ListDMZ)
+	dmz.POST("", apihandler.AddDMZ)
+	dmz.PUT("", apihandler.EditDMZ)
+	dmz.DELETE("/:id", apihandler.DeleteDMZ)
+	// Network — NAT
+	nat := net.Group("/nat")
+	nat.GET("", apihandler.ListNAT)
+	nat.POST("", apihandler.AddNAT)
+	nat.PUT("", apihandler.EditNAT)
+	nat.DELETE("/:id", apihandler.DeleteNAT)
+	// Network — QoS by IP
+	qip := net.Group("/qos/ip")
+	qip.GET("", apihandler.ListQosIP)
+	qip.POST("", apihandler.AddQosIP)
+	qip.PUT("", apihandler.EditQosIP)
+	qip.DELETE("/:id", apihandler.DeleteQosIP)
+	// Network — QoS by MAC
+	qmac := net.Group("/qos/mac")
+	qmac.GET("", apihandler.ListQosMac)
+	qmac.POST("", apihandler.AddQosMac)
+	qmac.PUT("", apihandler.EditQosMac)
+	qmac.DELETE("/:id", apihandler.DeleteQosMac)
+	// Network — VLAN
+	vlan := net.Group("/vlan")
+	vlan.GET("", apihandler.ListVLAN)
+	vlan.POST("", apihandler.AddVLAN)
+	vlan.PUT("", apihandler.EditVLAN)
+
+	// Security — MAC filter rules
+	mac := fw.Group("/mac-rules")
+	mac.GET("", apihandler.ListMacRules)
+	mac.POST("", apihandler.AddMacRules)
+	mac.PUT("", apihandler.EditMacRules)
+	mac.DELETE("/:id", apihandler.DeleteMacRules)
+
+	// Routing — load balance (multi-WAN)
+	lb := v1.Group("/routing/load-balance")
+	lb.GET("", apihandler.ListLoadBalance)
+	lb.POST("", apihandler.AddLoadBalance)
+	lb.PUT("", apihandler.EditLoadBalance)
+	lb.DELETE("/:id", apihandler.DeleteLoadBalance)
+	// Routing — app-protocol rules
+	ap := v1.Group("/routing/app-protocols")
+	ap.GET("", apihandler.ListAppProtocols)
+	ap.POST("", apihandler.AddAppProtocols)
+	ap.PUT("", apihandler.EditAppProtocols)
+	ap.DELETE("/:id", apihandler.DeleteAppProtocols)
+
 	// WebUI
 	h.GET("/ui", apihandler.WebUI)
 }
