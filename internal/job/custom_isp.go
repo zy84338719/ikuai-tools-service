@@ -12,16 +12,12 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
 )
 
-// custom_isp has no v4 REST endpoint (the "custom ISP" concept was removed from
-// the v4 surface). The router firmware still serves the legacy /Action/call
-// RPC even on v4, so these jobs use Manager.Client().Post against /Action/call
-// with func_name="custom_isp" — the same protocol ikuai-bypass uses.
-//
-// TODO(router-verify): confirm against your firmware that /Action/call is still
-// reachable with a v4 token; if not, this job must be reworked onto ip-objects.
-
-// actionCallBody/actionCallResp/actionCall live on ikuai.Manager (ActionCall);
-// the legacy /Action/call RPC is shared by both jobs and the firewall handlers.
+// custom_isp has NO v4 equivalent. Verified against iKuai 4.0.303: the v3
+// /Action/call RPC returns 404, and no /custom-isp REST endpoint exists. The
+// "自定义运营商" concept was removed in v4. This job therefore aborts with a
+// clear error so job_runs records the limitation; a future reimplementation
+// would build on ip-objects + routing rules, but the data model differs
+// enough that it is tracked separately.
 
 // customISPItem mirrors one row returned by custom_isp/show.
 type customISPItem struct {
@@ -34,26 +30,19 @@ type customISPItem struct {
 // SyncCustomISP runs the custom-isp sync against one router. The scheduler
 // calls this once per registered router. Every execution (success, partial, or
 // failed) is persisted to job_runs.
+//
+// NOTE: custom_isp has no v4 equivalent (verified on iKuai 4.0.303). This job
+// always fails fast with errV4ActionCallGone so the limitation is visible in
+// job_runs rather than silently doing nothing.
 func SyncCustomISP(routerID string, cfg *conf.CronCustomISPConfig, jobsCfg *conf.JobsConfig) error {
 	tag := cfg.GetTag()
 	name := "custom-isp/" + tag
 	markRunning(routerID, name)
 	start := time.Now()
-	changed, failed, err := syncCustomISP(routerID, cfg, jobsCfg)
+	err := errV4ActionCallGone
 	markDone(routerID, name, err)
-
-	// Persist outcome to job_runs. status reflects whether the job ran to
-	// completion: "failed" on a hard error, "partial" if some chunks errored,
-	// "success" otherwise.
-	status := "success"
-	errMsg := ""
-	if err != nil {
-		status = "failed"
-		errMsg = err.Error()
-	} else if failed > 0 {
-		status = "partial"
-	}
-	recordRun(routerID, "custom-isp", tag, status, changed, failed, time.Since(start), errMsg)
+	recordRun(routerID, "custom-isp", tag, "failed", 0, 0, time.Since(start), err.Error())
+	logger.Error(fmt.Sprintf("custom-isp/%s[%s]: %v", tag, routerID, err))
 	return err
 }
 

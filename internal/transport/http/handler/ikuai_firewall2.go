@@ -95,18 +95,16 @@ func DeleteIPGroup(ctx context.Context, c *app.RequestContext) {
 	resp.Success(c, nil)
 }
 
-// ── Stream IP Port ────────────────────────────────────────────────────────────
-// stream_ipport has no v4 REST endpoint; falls back to /Action/call.
+// ── Stream IP Port → routing/five-tuple-rules (v4) ────────────────────────────
+// The v3 stream_ipport (/Action/call) is gone in v4; the v4 equivalent is the
+// five-tuple rule (src/dst IP+port+protocol).
 
 func ListStreamIPPort(ctx context.Context, c *app.RequestContext) {
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	data, err := m.ActionCall(ctx, "stream_ipport", "show", map[string]string{
-		"TYPE": "total,data", "limit": "0,500",
-	})
+	data, err := api.Routing().ListRoutingFiveTupleRules(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
@@ -123,16 +121,16 @@ func AddStreamIPPort(ctx context.Context, c *app.RequestContext) {
 	if req["enabled"] == nil {
 		req["enabled"] = "yes"
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	if _, err := m.ActionCall(ctx, "stream_ipport", "add", req); err != nil {
+	id, err := api.Routing().CreateRoutingFiveTupleRules(ctx, req)
+	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, nil)
+	resp.Success(c, map[string]int64{"id": id})
 }
 
 func EditStreamIPPort(ctx context.Context, c *app.RequestContext) {
@@ -141,12 +139,11 @@ func EditStreamIPPort(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	if _, err := m.ActionCall(ctx, "stream_ipport", "edit", req); err != nil {
+	if err := api.Routing().UpdateRoutingFiveTupleRules(ctx, req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
@@ -159,31 +156,27 @@ func DeleteStreamIPPort(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "invalid ids: "+err.Error())
 		return
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	if _, err := m.ActionCall(ctx, "stream_ipport", "del", map[string]any{"id": joinInts(ids)}); err != nil {
-		resp.InternalError(c, err.Error())
-		return
+	for _, id := range ids {
+		if err := api.Routing().DeleteRoutingFiveTupleRules(ctx, int64(id)); err != nil {
+			resp.InternalError(c, err.Error())
+			return
+		}
 	}
 	resp.Success(c, nil)
 }
 
-// ── Conn Limit ────────────────────────────────────────────────────────────────
-// conn_limit has no v4 REST endpoint; falls back to /Action/call.
-// TODO(router-verify): v4 equivalent may be security/peerconn/rules.
+// ── Conn Limit → security/peerconn/rules (v4) ─────────────────────────────────
 
 func ListConnLimit(ctx context.Context, c *app.RequestContext) {
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	data, err := m.ActionCall(ctx, "conn_limit", "show", map[string]string{
-		"TYPE": "total,data", "limit": "0,500",
-	})
+	data, err := api.Security().ListSecurityPeerconnRules(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
@@ -197,16 +190,16 @@ func AddConnLimit(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	if _, err := m.ActionCall(ctx, "conn_limit", "add", req); err != nil {
+	id, err := api.Security().CreateSecurityPeerconnRules(ctx, req)
+	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, nil)
+	resp.Success(c, map[string]int64{"id": id})
 }
 
 func EditConnLimit(ctx context.Context, c *app.RequestContext) {
@@ -215,12 +208,11 @@ func EditConnLimit(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	if _, err := m.ActionCall(ctx, "conn_limit", "edit", req); err != nil {
+	if err := api.Security().UpdateSecurityPeerconnRules(ctx, req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
@@ -228,17 +220,16 @@ func EditConnLimit(ctx context.Context, c *app.RequestContext) {
 }
 
 func DeleteConnLimit(ctx context.Context, c *app.RequestContext) {
-	id, err := strconv.Atoi(string(c.Param("id")))
+	id, err := strconv.ParseInt(string(c.Param("id")), 10, 64)
 	if err != nil {
 		resp.BadRequest(c, "invalid id")
 		return
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	if _, err := m.ActionCall(ctx, "conn_limit", "del", map[string]any{"id": strconv.Itoa(id)}); err != nil {
+	if err := api.Security().DeleteSecurityPeerconnRules(ctx, id); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}

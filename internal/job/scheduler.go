@@ -13,6 +13,11 @@ import (
 
 var errNoClient = errors.New("ikuai client not initialized")
 
+// errV4ActionCallGone signals that a legacy /Action/call feature is no longer
+// reachable on iKuai v4 (the RPC was removed). Jobs that depend on it abort
+// with this so job_runs records a clear cause instead of an opaque 404.
+var errV4ActionCallGone = errors.New("not supported on iKuai v4: the v3 /Action/call RPC was removed and this feature has no v4 equivalent yet")
+
 func itoa(n int) string { return strconv.Itoa(n) }
 
 type Scheduler struct {

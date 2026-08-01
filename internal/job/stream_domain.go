@@ -12,11 +12,11 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
 )
 
-// stream_domain has no v4 REST endpoint. Like custom_isp it falls back to the
-// legacy /Action/call RPC (func_name="stream_domain"). See the note in
-// custom_isp.go.
-// TODO(router-verify): if /Action/call is unreachable on your firmware, rework
-// this onto routing/domain-rules.
+// stream_domain's v3 /Action/call RPC is gone in iKuai v4 (404). A v4
+// equivalent exists at routing/domain-rules, but its field model differs from
+// the v3 stream_domain sync (which chunks domains into multiple records), so
+// the migration is tracked separately. For now this job fails fast with
+// errV4ActionCallGone so the limitation shows up in job_runs.
 
 // streamDomainItem mirrors one row returned by stream_domain/show.
 type streamDomainItem struct {
@@ -26,24 +26,19 @@ type streamDomainItem struct {
 }
 
 // SyncStreamDomain runs the stream-domain sync against one router. Every
-// execution (success, partial, or failed) is persisted to job_runs.
+// execution is persisted to job_runs.
+//
+// NOTE: fails fast on v4 (see package note); will be reworked onto
+// routing/domain-rules in a follow-up.
 func SyncStreamDomain(routerID string, cfg *conf.CronStreamDomainConfig, jobsCfg *conf.JobsConfig) error {
 	tag := cfg.GetTag()
 	name := "stream-domain/" + tag
 	markRunning(routerID, name)
 	start := time.Now()
-	changed, failed, err := syncStreamDomain(routerID, cfg, jobsCfg)
+	err := errV4ActionCallGone
 	markDone(routerID, name, err)
-
-	status := "success"
-	errMsg := ""
-	if err != nil {
-		status = "failed"
-		errMsg = err.Error()
-	} else if failed > 0 {
-		status = "partial"
-	}
-	recordRun(routerID, "stream-domain", tag, status, changed, failed, time.Since(start), errMsg)
+	recordRun(routerID, "stream-domain", tag, "failed", 0, 0, time.Since(start), err.Error())
+	logger.Error(fmt.Sprintf("stream-domain/%s[%s]: %v", tag, routerID, err))
 	return err
 }
 

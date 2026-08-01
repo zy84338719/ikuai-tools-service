@@ -118,19 +118,16 @@ func DeleteDHCPStatic(ctx context.Context, c *app.RequestContext) {
 	resp.Success(c, nil)
 }
 
-// ── DNS Static ────────────────────────────────────────────────────────────────
-// dns static has no v4 REST endpoint; falls back to /Action/call (func_name
-// "dns_static"). TODO(router-verify).
+// ── DNS Static → network/dns/proxy/rules (v4) ─────────────────────────────────
+// v3 dns_static (/Action/call) is gone in v4; DNS static mappings use the
+// dns-proxy-rules endpoint (domain → dns_addr).
 
 func ListDNSStatic(ctx context.Context, c *app.RequestContext) {
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	data, err := m.ActionCall(ctx, "dns_static", "show", map[string]string{
-		"TYPE": "total,data", "limit": "0,500",
-	})
+	data, err := api.Network().ListNetworkDnsProxyRules(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
@@ -144,16 +141,16 @@ func AddDNSStatic(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	if _, err := m.ActionCall(ctx, "dns_static", "add", req); err != nil {
+	id, err := api.Network().CreateNetworkDnsProxyRules(ctx, req)
+	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, nil)
+	resp.Success(c, map[string]int64{"id": id})
 }
 
 func EditDNSStatic(ctx context.Context, c *app.RequestContext) {
@@ -162,12 +159,11 @@ func EditDNSStatic(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, err.Error())
 		return
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	if _, err := m.ActionCall(ctx, "dns_static", "edit", req); err != nil {
+	if err := api.Network().UpdateNetworkDnsProxyRules(ctx, req); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
@@ -175,17 +171,16 @@ func EditDNSStatic(ctx context.Context, c *app.RequestContext) {
 }
 
 func DeleteDNSStatic(ctx context.Context, c *app.RequestContext) {
-	id, err := strconv.Atoi(string(c.Param("id")))
+	id, err := strconv.ParseInt(string(c.Param("id")), 10, 64)
 	if err != nil {
 		resp.BadRequest(c, "invalid id")
 		return
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	if _, err := m.ActionCall(ctx, "dns_static", "del", map[string]any{"id": strconv.Itoa(id)}); err != nil {
+	if err := api.Network().DeleteNetworkDnsProxyRules(ctx, id); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}

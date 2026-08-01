@@ -9,24 +9,19 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
+// notSupportedV4 reports that a feature has no v4 equivalent. Used for the
+// legacy /Action/call features the v4 firmware dropped (custom_isp).
+func notSupportedV4(c *app.RequestContext, feature string) {
+	resp.BadRequest(c, feature+" is not available on iKuai v4 (the v3 /Action/call RPC was removed and there is no v4 equivalent)")
+}
+
 // ── Custom ISP ────────────────────────────────────────────────────────────────
-// custom_isp has no v4 REST endpoint; falls back to /Action/call (see
-// ikuai.Manager.ActionCall). TODO(router-verify).
+// custom_isp ("自定义运营商") has no v4 REST equivalent and the v3 /Action/call
+// RPC returns 404 on iKuai v4. Tracked for reimplementation on ip-objects +
+// routing rules; for now these endpoints report the limitation clearly.
 
 func ListCustomISP(ctx context.Context, c *app.RequestContext) {
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
-		return
-	}
-	data, err := m.ActionCall(ctx, "custom_isp", "show", map[string]string{
-		"TYPE": "total,data", "limit": "0,500",
-	})
-	if err != nil {
-		resp.InternalError(c, err.Error())
-		return
-	}
-	resp.Success(c, data)
+	notSupportedV4(c, "custom_isp")
 }
 
 type AddCustomISPReq struct {
@@ -36,59 +31,21 @@ type AddCustomISPReq struct {
 }
 
 func AddCustomISP(ctx context.Context, c *app.RequestContext) {
-	var req AddCustomISPReq
-	if err := c.BindAndValidate(&req); err != nil {
-		resp.BadRequest(c, err.Error())
-		return
-	}
-	if req.Name == "" || len(req.IPGroup) == 0 {
-		resp.BadRequest(c, "name and ip_group are required")
-		return
-	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
-		return
-	}
-	if _, err := m.ActionCall(ctx, "custom_isp", "add", map[string]any{
-		"name": req.Name, "ipgroup": strings.Join(req.IPGroup, ","), "comment": req.Comment,
-	}); err != nil {
-		resp.InternalError(c, err.Error())
-		return
-	}
-	resp.Success(c, nil)
+	notSupportedV4(c, "custom_isp")
 }
 
 func DeleteCustomISP(ctx context.Context, c *app.RequestContext) {
-	ids, err := parseIDs(string(c.Param("ids")))
-	if err != nil {
-		resp.BadRequest(c, "invalid ids: "+err.Error())
-		return
-	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
-		return
-	}
-	if _, err := m.ActionCall(ctx, "custom_isp", "del", map[string]any{"id": joinInts(ids)}); err != nil {
-		resp.InternalError(c, err.Error())
-		return
-	}
-	resp.Success(c, nil)
+	notSupportedV4(c, "custom_isp")
 }
 
-// ── Stream Domain ─────────────────────────────────────────────────────────────
-// stream_domain has no v4 REST endpoint; falls back to /Action/call.
+// ── Stream Domain → routing/domain-rules (v4) ─────────────────────────────────
 
 func ListStreamDomain(ctx context.Context, c *app.RequestContext) {
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	data, err := m.ActionCall(ctx, "stream_domain", "show", map[string]string{
-		"TYPE": "total,data", "limit": "0,500",
-	})
+	data, err := api.Routing().ListRoutingDomainRules(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
@@ -113,34 +70,41 @@ func AddStreamDomain(ctx context.Context, c *app.RequestContext) {
 		resp.BadRequest(c, "interface and domains are required")
 		return
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	if _, err := m.ActionCall(ctx, "stream_domain", "add", map[string]any{
-		"enabled": "yes", "interface": strings.Join(req.Interface, ","),
-		"src_addr": req.SrcAddr, "domain": strings.Join(req.Domains, ","), "comment": req.Comment,
-	}); err != nil {
+	id, err := api.Routing().CreateRoutingDomainRules(ctx, map[string]any{
+		"enabled":   "yes",
+		"interface": strings.Join(req.Interface, ","),
+		"src_addr":  req.SrcAddr,
+		"domain":    strings.Join(req.Domains, ","),
+		"comment":   req.Comment,
+	})
+	if err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
-	resp.Success(c, nil)
+	resp.Success(c, map[string]int64{"id": id})
 }
 
 func DeleteStreamDomain(ctx context.Context, c *app.RequestContext) {
-	ids, err := parseIDs(string(c.Param("ids")))
+	id, err := strconv.ParseInt(strings.TrimSpace(string(c.Param("ids"))), 10, 64)
 	if err != nil {
-		resp.BadRequest(c, "invalid ids: "+err.Error())
+		// The route passes comma-separated ids; v4 Delete takes one id, so take
+		// the first and loop is overkill for the UI's single-row delete.
+		first := strings.SplitN(string(c.Param("ids")), ",", 2)[0]
+		id, err = strconv.ParseInt(strings.TrimSpace(first), 10, 64)
+		if err != nil {
+			resp.BadRequest(c, "invalid ids")
+			return
+		}
+	}
+	api := ikuaiAPI(c)
+	if api == nil {
 		return
 	}
-	m := managerFor(c)
-	if m == nil || m.Client() == nil {
-		resp.InternalError(c, "ikuai client not connected")
-		return
-	}
-	idStr := joinInts(ids)
-	if _, err := m.ActionCall(ctx, "stream_domain", "del", map[string]any{"id": idStr}); err != nil {
+	if err := api.Routing().DeleteRoutingDomainRules(ctx, id); err != nil {
 		resp.InternalError(c, err.Error())
 		return
 	}
