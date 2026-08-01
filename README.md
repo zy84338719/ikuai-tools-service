@@ -60,405 +60,98 @@ curl -H "Authorization: Bearer <your-api-key>" \
 
 ---
 
-## 项目结构（脚手架基础）
-
-基于 CloudWeGo Hertz + Kitex 的 Go 微服务脚手架模板。
-集成 Hz HTTP 代码生成、Kitex RPC 代码生成、SQLite/MySQL/PostgreSQL、Redis。
-
-### 分层架构
-
 ## 项目结构
 
 ```
 ikuai-tools-service/
-├── cmd/server/                 # 服务入口
-│   ├── main.go                 # 程序入口
-│   └── bootstrap/              # 初始化代码
-│       └── bootstrap.go
-├── configs/                    # 配置文件（仅 YAML）
-│   └── config.yaml
-├── gen/                        # 自动生成代码（禁止手动修改）
-│   ├── http/                   # Hz 生成的 HTTP 代码
-│   │   ├── handler/            # 请求处理器
-│   │   ├── router/             # 路由注册
-│   │   └── model/              # 请求/响应模型
-│   └── rpc/                    # Kitex 生成的 RPC 代码
-├── idl/                        # 接口定义文件
-│   ├── api/api.proto           # HTTP 注解定义
-│   ├── http/                   # HTTP 服务 IDL
-│   │   └── health.proto        # 健康检查
-│   └── rpc/                    # RPC 服务 IDL
-│       └── health.proto        # RPC 探活
-├── internal/                   # 项目私有代码（手写）
-│   ├── app/                    # 应用层：业务逻辑
-│   │   └── user/               # 用户服务示例
-│   ├── transport/              # 传输层：协议适配
-│   │   ├── http/               # HTTP 适配
-│   │   │   ├── handler/        # 复杂 handler 实现
-│   │   │   └── middleware/     # 中间件
-│   │   └── rpc/                # RPC 适配
-│   │       └── handler/        # RPC 服务实现
-│   ├── repo/                   # 数据层：数据访问
-│   │   ├── db/                 # 数据库
-│   │   │   ├── database.go     # 连接初始化
-│   │   │   ├── model/          # GORM 模型
-│   │   │   └── dao/            # 数据访问对象
-│   │   ├── redis/              # Redis 缓存
-│   │   └── external/           # 外部服务调用
-│   ├── conf/                   # 配置结构体和加载逻辑
-│   └── pkg/                    # 内部工具库
-│       ├── errors/             # 错误码
-│       ├── logger/             # 日志封装
-│       └── resp/               # HTTP 响应封装
-├── scripts/                    # 脚本
-│   └── gen.sh                  # 代码生成脚本
-├── docs/                       # 文档
-├── Makefile
-├── Dockerfile
-└── go.mod
+├── cmd/server/                    # 程序入口 + bootstrap（路由注册、中间件、依赖装配）
+├── configs/                       # config.yaml(.example)
+├── gen/                           # Hz 生成的 HTTP 路由/模型（health/common）— 勿手改
+├── idl/                           # Hertz IDL（proto）定义
+├── internal/
+│   ├── ikuai/                     # 多路由器连接 Registry（核心）
+│   ├── job/                       # 定时同步任务（custom_isp/stream_domain）+ 执行历史
+│   ├── app/router/                # 路由器 CRUD service
+│   ├── conf/                      # 配置结构与校验
+│   ├── pkg/                       # logger / resp / errors / ctxkey
+│   ├── repo/                      # db（GORM 模型/DAO）、redis
+│   └── transport/http/            # handler（业务）+ middleware（auth/audit/cors/logger/recovery）
+├── Dockerfile                     # 从 monorepo 根构建（见下）
+└── Makefile
 ```
 
-## 环境要求
+### 分层架构
 
-- Go 1.21+
-- hz（HTTP 代码生成）
-- kitex（RPC 代码生成，可选）
+```
+HTTP 请求 → middleware（Recovery→Logger→CORS→Auth→Audit）
+         → handler（按 :router_id 解析 Manager）
+         → ikuai.Registry（取对应路由器的 *Client）
+         → ikuai-api SDK（v4 REST / ActionCall 逃生舱）
+         → 路由器
 
-## 快速开始
+job（定时）→ Registry.Names() 遍历每台路由器 → SyncCustomISP/SyncStreamDomain → job_runs 落库
+```
 
-> ⚠️ **重要提示**：首次运行前必须执行代码生成！
+## 安全
+
+- **鉴权**：`auth.api_key` 设置后，所有非 public 请求需带 `Authorization: Bearer <key>` 或 `X-API-Key: <key>`。**release 模式下空 key 会拒绝启动**；debug 模式允许无鉴权（仅限可信内网）。
+- **审计**：所有写操作（POST/PUT/PATCH/DELETE）记录到 `audit_logs`（actor/method/path/router_id/status/req_id/ip）。
+- **CORS**：`server.cors_origins` 配置允许的来源白名单，默认 `*`（可信内网）；公网部署应收紧。
+- 路由器 token 明文存库（`routers.token`，API 响应已脱敏为 `has_token`），请保护数据库访问。
+
+## 配置
+
+完整配置项见 `configs/config.yaml.example`（含逐项注释）。关键项：
+
+| 项 | 说明 |
+|----|------|
+| `server.mode` | `release` 强制鉴权；`debug` 允许无鉴权 |
+| `server.cors_origins` | CORS 白名单，默认 `*` |
+| `auth.api_key` | API Key，release 模式必填 |
+| `ikuai.*` | 默认路由器（legacy；推荐用 `/api/v1/routers` API 管理） |
+| `metrics.*` | 内嵌 Prometheus exporter（独立 9100 端口） |
+| `jobs.*` | 定时同步任务（custom_isp / stream_domain） |
+
+## 部署
+
+### Docker
+
+Dockerfile 从 **monorepo 根** 构建（服务通过本地 `replace` 依赖同级的 `ikuai-api/` 和 `ikuai_exporter/`）：
 
 ```bash
-# 1. 安装工具
-make tools-install
+# 在包含 ikuai-api/ ikuai_exporter/ ikuai-tools-service/ 的目录下
+docker build -t ikuai-tools-service -f ikuai-tools-service/Dockerfile .
 
-# 2. 安装依赖
-go mod tidy
-
-# 3. 首次运行必须生成代码（重要！）
-make gen-http-update IDL=common.proto
-
-# 4. 运行服务
-make run
-
-# 5. 构建
-make build
+# 运行（挂载真实配置 + 数据库卷）
+docker run -d -p 9997:9997 -p 9100:9100 \
+  -v $PWD/config.yaml:/app/configs/config.yaml \
+  -v ikuai-data:/app/data \
+  -e CONFIG_PATH=/app/configs/config.yaml \
+  ikuai-tools-service
 ```
 
-### 首次运行说明
-
-由于模板中的 `gen/` 目录只包含框架结构，具体的 Handler 和 Model 代码需要通过 IDL 文件生成。因此**首次运行前必须执行代码生成命令**：
-
-```bash
-# 生成基础 HTTP 服务代码
-make gen-http-update IDL=common.proto
-
-# 或者生成特定的 HTTP 服务
-make gen-http-update IDL=http/health.proto
-
-# 批量生成所有 HTTP 服务
-make gen-http-update-all
-```
-
-执行完代码生成后，项目才能正常编译和运行。
-
-## 代码生成
-
-> 📝 **注意**：新项目首次使用时，必须先执行代码生成命令，否则无法编译！
-
-### HTTP 代码生成 (Hz)
-
-```bash
-# 首次初始化项目（推荐）
-make gen-http-new IDL=common.proto
-
-# 更新已有项目
-make gen-http-update IDL=common.proto
-
-# 批量更新所有 HTTP IDL 文件
-make gen-http-update-all
-
-# 强制重新初始化（谨慎使用）
-make gen-http-init IDL=common.proto
-```
-
-### RPC 代码生成 (Kitex)
-
-```bash
-# 生成 RPC 代码
-make gen-rpc IDL=rpc/health.proto
-```
-
-### 定义新的 HTTP 接口
-
-在 `idl/http/` 目录创建 proto 文件：
-
-```protobuf
-// idl/http/example.proto
-syntax = "proto3";
-
-package http.example;
-
-option go_package = "github.com/zy84338719/ikuai-tools-service/gen/http/model/example";
-
-import "api/api.proto";
-
-message HelloReq {
-    string name = 1 [(api.query) = "name"];
-}
-
-message HelloResp {
-    string message = 1 [(api.body) = "message"];
-}
-
-service ExampleService {
-    rpc Hello(HelloReq) returns(HelloResp) {
-        option (api.get) = "/api/v1/hello";
-    }
-}
-```
-
-然后生成代码：
-
-```bash
-make gen-http-new IDL=http/example.proto
-```
-
-### 定义新的 RPC 接口
-
-在 `idl/rpc/` 目录创建 proto 文件：
-
-```protobuf
-// idl/rpc/example.proto
-syntax = "proto3";
-
-package rpc.example;
-
-option go_package = "github.com/zy84338719/ikuai-tools-service/gen/rpc/example";
-
-message ExampleReq {
-    string name = 1;
-}
-
-message ExampleResp {
-    string message = 1;
-}
-
-service ExampleService {
-    rpc Hello(ExampleReq) returns (ExampleResp);
-}
-```
-
-然后生成代码：
-
-```bash
-make gen-rpc IDL=rpc/example.proto
-```
-
-## 分层架构
-
-```
-请求 → gen/http/handler（参数解析）
-         ↓
-     internal/app（业务逻辑）
-         ↓
-     internal/repo（数据访问）
-         ↓
-     数据库 / Redis / 外部服务
-```
-
-### 实现业务逻辑
-
-Handler 调用 app 层服务：
-
-```go
-// gen/http/handler/example/example_service.go
-func Hello(ctx context.Context, c *app.RequestContext) {
-    var req example.HelloReq
-    if err := c.BindAndValidate(&req); err != nil {
-        resp.BadRequest(c, err.Error())
-        return
-    }
-
-    svc := exampleSvc.NewService()
-    result, err := svc.Hello(ctx, req.Name)
-    if err != nil {
-        resp.InternalError(c, err.Error())
-        return
-    }
-
-    resp.Success(c, result)
-}
-```
-
-App 层实现业务逻辑：
-
-```go
-// internal/app/example/service.go
-type Service struct {
-    repo *dao.ExampleRepository
-}
-
-func NewService() *Service {
-    return &Service{repo: dao.NewExampleRepository()}
-}
-
-func (s *Service) Hello(ctx context.Context, name string) (string, error) {
-    return fmt.Sprintf("Hello, %s!", name), nil
-}
-```
-
-## 数据库操作
-
-### 定义模型
-
-```go
-// internal/repo/db/model/user.go
-type User struct {
-    gorm.Model
-    Username string `gorm:"uniqueIndex;size:50" json:"username"`
-    Email    string `gorm:"uniqueIndex;size:100" json:"email"`
-}
-
-func (User) TableName() string {
-    return "users"
-}
-```
-
-### DAO 层
-
-```go
-// internal/repo/db/dao/user.go
-type UserRepository struct {
-    db *gorm.DB
-}
-
-func NewUserRepository() *UserRepository {
-    return &UserRepository{db: db.GetDB()}
-}
-
-func (r *UserRepository) Create(ctx context.Context, user *model.User) error {
-    return r.db.WithContext(ctx).Create(user).Error
-}
-
-func (r *UserRepository) GetByID(ctx context.Context, id uint) (*model.User, error) {
-    var user model.User
-    err := r.db.WithContext(ctx).First(&user, id).Error
-    return &user, err
-}
-```
-
-## Redis 操作
-
-```go
-import "github.com/zy84338719/ikuai-tools-service/internal/repo/redis"
-
-// 基本操作
-redis.Set(ctx, "key", "value", time.Hour)
-val, err := redis.Get(ctx, "key")
-redis.Del(ctx, "key")
-
-// Hash
-redis.HSet(ctx, "user:1", "name", "John")
-name, _ := redis.HGet(ctx, "user:1", "name")
-
-// List
-redis.LPush(ctx, "queue", "item1", "item2")
-items, _ := redis.LRange(ctx, "queue", 0, -1)
-```
-
-## 统一响应格式
-
-所有 API 返回统一格式：
-
-```json
-{
-  "code": 0,
-  "message": "success",
-  "data": {}
-}
-```
-
-使用方式：
-
-```go
-import "github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
-
-resp.Success(c, data)
-resp.Page(c, list, total, page, pageSize)
-resp.BadRequest(c, "参数错误")
-resp.Unauthorized(c, "未授权")
-resp.NotFound(c, "未找到")
-resp.InternalError(c, "内部错误")
-```
-
-## 配置说明
-
-```yaml
-# configs/config.yaml
-server:
-  host: "0.0.0.0"
-  port: 9997
-
-database:
-  driver: "mysql"
-  host: "localhost"
-  port: 3306
-  user: "root"
-  password: ""
-  db_name: "ikuai-tools-service"
-  ssl_mode: "disable"
-
-redis:
-  host: "localhost"
-  port: 6379
-  password: ""
-  db: 0
-
-log:
-  level: "info"
-  filename: ""
-  max_size: 100
-  max_backups: 10
-  max_age: 30
-  compress: true
-
-app:
-  name: "ikuai-tools-service"
-  version: "1.0.0"
-```
-
-支持通过环境变量覆盖：
-
-```bash
-CONFIG_PATH=configs/config.prod.yaml ./server
-```
-
-## Makefile 命令
-
-| 命令 | 用途 |
-|------|------|
-| `make run` | 运行服务 |
-| `make build` | 编译 |
-| `make test` | 运行测试 |
-| `make lint` | 代码检查 |
-| `make tidy` | 整理依赖 |
-| `make gen-http-new IDL=...` | 生成 HTTP 代码 |
-| `make gen-http-update IDL=...` | 更新 HTTP 代码 |
-| `make gen-rpc IDL=...` | 生成 RPC 代码 |
-| `make gen-rpc-all` | 生成所有 RPC |
-| `make tools-install` | 安装 hz + kitex |
-| `make docker-build` | 构建 Docker 镜像 |
+> 默认 SQLite 数据库落在 `/app`；如用 MySQL/PostgreSQL，在 config 里配 `database.*`。
 
 ## 技术栈
 
-- [Hertz](https://github.com/cloudwego/hertz) - HTTP 框架
-- [Kitex](https://github.com/cloudwego/kitex) - RPC 框架
-- [hz](https://github.com/cloudwego/hertz/cmd/hz) - HTTP 代码生成
-- [GORM](https://gorm.io/) - ORM
-- [go-redis](https://github.com/redis/go-redis) - Redis 客户端
-- [Viper](https://github.com/spf13/viper) - 配置管理
-- [Zap](https://github.com/uber-go/zap) - 日志
+- [CloudWeGo Hertz](https://github.com/cloudwego/hertz) — HTTP 框架
+- [ikuai-api](../ikuai-api) — iKuai v4 SDK
+- [GORM](https://gorm.io/) — ORM（SQLite/MySQL/PostgreSQL）
+- [gocron](https://github.com/go-co-op/gocron) — 定时任务
+- [zap](https://github.com/uber-go/zap) — 结构化日志
+- [Prometheus client_golang](https://github.com/prometheus/client_golang) — 指标
+
+## 代码生成（IDL 驱动）
+
+health/common 的路由由 Hz 从 `idl/` 生成到 `gen/`（已提交，开箱即用）。新增 HTTP 接口时：
+
+```bash
+make gen-http-update IDL=<proto>   # 更新；详见 Makefile
+```
+
+> 业务 handler（`internal/transport/http/handler/ikuai_*.go`）和路由注册（`bootstrap.go`）是手写的，不受代码生成影响。
+
+---
 
 ## License
 

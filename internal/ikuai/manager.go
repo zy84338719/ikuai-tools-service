@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"strings"
 	"sync"
 	"time"
 
@@ -119,7 +118,9 @@ func (r *Registry) Remove(name string) {
 	}
 	r.mu.Unlock()
 	if m != nil {
-		m.client.Close()
+		// Manager.Close is nil-safe (guards a client that was never built),
+		// unlike a direct m.client.Close() which would panic.
+		m.Close()
 	}
 }
 
@@ -221,20 +222,6 @@ func (m *Manager) ActionCall(ctx context.Context, funcName, action string, param
 		return nil, fmt.Errorf("/Action/call %s/%s failed: Result=%d %s", funcName, action, resp.Result, resp.ErrMSG)
 	}
 	return resp.Data, nil
-}
-
-// isAuthError reports whether err looks like an auth/permission failure.
-func isAuthError(err error) bool {
-	if err == nil {
-		return false
-	}
-	msg := strings.ToLower(err.Error())
-	for _, kw := range []string{"unauthorized", "forbidden", "invalid token", "token", "10000", "session expired", "please login"} {
-		if strings.Contains(msg, kw) {
-			return true
-		}
-	}
-	return false
 }
 
 // EnsureRouterByName resolves a manager by name (the :router_id path value),
