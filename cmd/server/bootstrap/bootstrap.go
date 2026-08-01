@@ -348,6 +348,33 @@ func registerIKuaiRoutes(h *server.Hertz) {
 	vlan.POST("", apihandler.AddVLAN)
 	vlan.PUT("", apihandler.EditVLAN)
 
+	// Objects — MAC / Domain / Port / Protocol / Time
+	obj := v1.Group("/objects")
+	// MAC objects
+	mobj := obj.Group("/mac")
+	mobj.GET("", apihandler.ListMacObjects); mobj.POST("", apihandler.AddMacObjects); mobj.PUT("", apihandler.EditMacObjects); mobj.DELETE("/:id", apihandler.DeleteMacObjects)
+	// Domain objects
+	dobj := obj.Group("/domain")
+	dobj.GET("", apihandler.ListDomainObjects); dobj.POST("", apihandler.AddDomainObjects); dobj.PUT("", apihandler.EditDomainObjects); dobj.DELETE("/:id", apihandler.DeleteDomainObjects)
+	// Port objects
+	pobj := obj.Group("/port")
+	pobj.GET("", apihandler.ListPortObjects); pobj.POST("", apihandler.AddPortObjects); pobj.PUT("", apihandler.EditPortObjects); pobj.DELETE("/:id", apihandler.DeletePortObjects)
+	// Protocol objects
+	pcobj := obj.Group("/protocol")
+	pcobj.GET("", apihandler.ListProtocolObjects); pcobj.POST("", apihandler.AddProtocolObjects); pcobj.PUT("", apihandler.EditProtocolObjects); pcobj.DELETE("/:id", apihandler.DeleteProtocolObjects)
+	// Time objects
+	tobj := obj.Group("/time")
+	tobj.GET("", apihandler.ListTimeObjects); tobj.POST("", apihandler.AddTimeObjects); tobj.PUT("", apihandler.EditTimeObjects); tobj.DELETE("/:id", apihandler.DeleteTimeObjects)
+
+	// Monitoring — traffic / topology (read-only)
+	mon := v1.Group("/monitoring")
+	mon.GET("/interfaces-traffic", apihandler.GetInterfacesTraffic)
+	mon.GET("/downstream", apihandler.GetDownstream)
+	mon.GET("/switch", apihandler.GetSwitch)
+	mon.GET("/network", apihandler.GetNetworkTopology)
+	mon.GET("/app-traffic-summary", apihandler.GetAppTrafficSummary)
+	mon.GET("/clients-traffic-summary", apihandler.GetClientsTrafficSummary)
+
 	// Security — MAC filter rules
 	mac := fw.Group("/mac-rules")
 	mac.GET("", apihandler.ListMacRules)
