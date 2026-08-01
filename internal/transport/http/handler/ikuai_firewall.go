@@ -9,19 +9,34 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
-// notSupportedV4 reports that a feature has no v4 equivalent. Used for the
-// legacy /Action/call features the v4 firmware dropped (custom_isp).
-func notSupportedV4(c *app.RequestContext, feature string) {
-	resp.BadRequest(c, feature+" is not available on iKuai v4 (the v3 /Action/call RPC was removed and there is no v4 equivalent)")
+// ── Custom ISP → objects/ip-objects (v4) ──────────────────────────────────────
+// v3 custom_isp ("自定义运营商": name + IP list) maps onto v4 IP object groups:
+// group_name ← name, group_value:[{ip,comment}] ← the IP list. Verified against
+// iKuai 4.0.303 (the v3 /Action/call RPC returns 404; /ip-objects CRUD works).
+
+// ipObject mirrors one row of /ip-objects[ip_data].
+type ipObject struct {
+	ID         int64                `json:"id"`
+	GroupName  string               `json:"group_name"`
+	GroupValue []ipObjectEntry      `json:"group_value"`
+	RefCount   int                  `json:"ref_count"`
+}
+type ipObjectEntry struct {
+	IP      string `json:"ip"`
+	Comment string `json:"comment"`
 }
 
-// ── Custom ISP ────────────────────────────────────────────────────────────────
-// custom_isp ("自定义运营商") has no v4 REST equivalent and the v3 /Action/call
-// RPC returns 404 on iKuai v4. Tracked for reimplementation on ip-objects +
-// routing rules; for now these endpoints report the limitation clearly.
-
 func ListCustomISP(ctx context.Context, c *app.RequestContext) {
-	notSupportedV4(c, "custom_isp")
+	api := ikuaiAPI(c)
+	if api == nil {
+		return
+	}
+	data, err := api.Objects().ListObjectsIpObjects(ctx, nil)
+	if err != nil {
+		resp.InternalError(c, err.Error())
+		return
+	}
+	resp.Success(c, data)
 }
 
 type AddCustomISPReq struct {
@@ -31,11 +46,53 @@ type AddCustomISPReq struct {
 }
 
 func AddCustomISP(ctx context.Context, c *app.RequestContext) {
-	notSupportedV4(c, "custom_isp")
+	var req AddCustomISPReq
+	if err := c.BindAndValidate(&req); err != nil {
+		resp.BadRequest(c, err.Error())
+		return
+	}
+	if req.Name == "" || len(req.IPGroup) == 0 {
+		resp.BadRequest(c, "name and ip_group are required")
+		return
+	}
+	api := ikuaiAPI(c)
+	if api == nil {
+		return
+	}
+	entries := make([]ipObjectEntry, 0, len(req.IPGroup))
+	for _, ip := range req.IPGroup {
+		entries = append(entries, ipObjectEntry{IP: ip})
+	}
+	id, err := api.Objects().CreateObjectsIpObjects(ctx, map[string]any{
+		"group_name":  req.Name,
+		"group_value": entries,
+		"comment":     req.Comment,
+	})
+	if err != nil {
+		resp.InternalError(c, err.Error())
+		return
+	}
+	resp.Success(c, map[string]int64{"id": id})
 }
 
 func DeleteCustomISP(ctx context.Context, c *app.RequestContext) {
-	notSupportedV4(c, "custom_isp")
+	ids, err := parseIDs(string(c.Param("ids")))
+	if err != nil {
+		resp.BadRequest(c, "invalid ids: "+err.Error())
+		return
+	}
+	api := ikuaiAPI(c)
+	if api == nil {
+		return
+	}
+	// v4 ip-objects delete takes a single ?id=; loop the comma list.
+	for _, id := range ids {
+		if err := api.Objects().DeleteObjectsIpObjects(ctx, int64(id)); err != nil {
+			resp.InternalError(c, err.Error())
+			return
+		}
+	}
+	resp.Success(c, nil)
 }
 
 // ── Stream Domain → routing/domain-rules (v4) ─────────────────────────────────
