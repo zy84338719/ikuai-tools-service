@@ -8,7 +8,6 @@ import (
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
 	"github.com/zy84338719/ikuai-tools-service/internal/repo/db"
 	"github.com/zy84338719/ikuai-tools-service/internal/repo/db/model"
-	"go.uber.org/zap"
 )
 
 // JobStatus is the in-memory, real-time view of a job (used for "running now"
@@ -82,7 +81,7 @@ func recordRun(routerID, jobType, tag, status string, changed, failed int, dur t
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 	if err := db.DB.WithContext(ctx).Create(r).Error; err != nil {
-		logger.Error("job_run write failed", zap.Error(err))
+		logger.Error("job_run write failed", "err", err)
 	}
 }
 

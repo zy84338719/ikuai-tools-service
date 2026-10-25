@@ -9,6 +9,8 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/oekit/concurrency/async"
+	mw "github.com/oekit/middleware"
 	"github.com/cloudwego/hertz/pkg/app/server"
 	"github.com/prometheus/client_golang/prometheus"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
@@ -139,7 +141,8 @@ func initServer(cfg *conf.Config) *server.Hertz {
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, cfg.Server.Port)
 	h := server.New(server.WithHostPorts(addr))
 
-	h.Use(middleware.Recovery())
+	// oekit/middleware panic-recovery (logx-integrated, stack-safe).
+	h.Use(mw.RecoveryMiddleware())
 	h.Use(middleware.Logger())              // injects X-Request-ID into context
 	h.Use(middleware.CORS(cfg.Server.CORSOrigins))
 	h.Use(middleware.Auth(cfg.Auth.APIKey)) // no-op when API key is empty
@@ -440,12 +443,12 @@ func startMetricsServer(cfg *conf.Config, registry *prometheus.Registry) {
 	})
 
 	addr := fmt.Sprintf("%s:%d", cfg.Server.Host, port)
-	go func() {
+	async.GoSafe(func() {
 		logger.Info(fmt.Sprintf("metrics server listening on %s%s", addr, metricsPath))
 		if err := http.ListenAndServe(addr, mux); err != nil {
 			logger.Error(fmt.Sprintf("metrics server error: %v", err))
 		}
-	}()
+	})
 }
 
 // Cleanup releases all resources gracefully.

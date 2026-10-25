@@ -6,8 +6,8 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/zy84338719/ikuai-tools-service/internal/conf"
+	"github.com/oekit/logx"
 	"github.com/zy84338719/ikuai-tools-service/internal/repo/db/model"
-	"go.uber.org/zap"
 	"gorm.io/driver/mysql"
 	"gorm.io/driver/postgres"
 	"gorm.io/gorm"
@@ -55,7 +55,7 @@ func Init(cfg *conf.DatabaseConfig) error {
 		sqlDB.SetConnMaxLifetime(time.Hour)
 	}
 
-	zap.L().Info("Database connected successfully", zap.String("driver", cfg.Driver))
+	logx.Info("Database connected successfully", "driver", cfg.Driver)
 
 	// AutoMigrate keeps the schema in sync with the models.
 	if err := DB.AutoMigrate(&model.AuditLog{}, &model.Router{}, &model.JobRun{}); err != nil {

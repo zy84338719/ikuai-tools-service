@@ -6,10 +6,10 @@ import (
 	"time"
 
 	"github.com/cloudwego/hertz/pkg/app"
+	"github.com/oekit/concurrency/gopool"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
 	"github.com/zy84338719/ikuai-tools-service/internal/repo/db"
 	"github.com/zy84338719/ikuai-tools-service/internal/repo/db/model"
-	"go.uber.org/zap"
 	"gorm.io/gorm"
 )
 
@@ -36,10 +36,14 @@ func Audit() app.HandlerFunc {
 
 		c.Next(ctx)
 
-		// Record asynchronously so it never blocks the response. The values
-		// are captured by value above, safe to use after c.Next.
+		// Record asynchronously (gopool: bounded, panic-safe) so it never
+		// blocks the response. Values are captured before c.Next returns —
+		// the RequestContext is not safe to touch from another goroutine.
+		ip := c.ClientIP()
 		status := c.Response.StatusCode()
-		go recordAudit(actor, method, path, routerID, status, reqID, c.ClientIP())
+		gopool.Go(func() {
+			recordAudit(actor, method, path, routerID, status, reqID, ip)
+		})
 	}
 }
 
@@ -99,7 +103,7 @@ func recordAudit(actor, method, path, routerID string, status int, reqID, ip str
 	if err := db.DB.WithContext(gctx).Create(entry).Error; err != nil {
 		// Never fail the request over an audit write; just log.
 		if err != gorm.ErrRecordNotFound {
-			logger.Error("audit log write failed", zap.Error(err), zap.String("path", path))
+			logger.Error("audit log write failed", "err", err, "path", path)
 		}
 	}
 }

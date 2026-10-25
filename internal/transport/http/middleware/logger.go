@@ -8,7 +8,6 @@ import (
 	"github.com/google/uuid"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/ctxkey"
 	log "github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
-	"go.uber.org/zap"
 )
 
 const headerRequestID = "X-Request-ID"
@@ -33,12 +32,12 @@ func Logger() app.HandlerFunc {
 
 		defer func() {
 			log.Info("HTTP",
-				zap.String("id", reqID),
-				zap.String("method", method),
-				zap.String("path", path),
-				zap.String("ip", c.ClientIP()),
-				zap.Int("status", c.Response.StatusCode()),
-				zap.Duration("latency", time.Since(start)),
+				"id", reqID,
+				"method", method,
+				"path", path,
+				"ip", c.ClientIP(),
+				"status", c.Response.StatusCode(),
+				"latency", time.Since(start),
 			)
 		}()
 

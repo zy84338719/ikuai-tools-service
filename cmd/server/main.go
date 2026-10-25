@@ -7,6 +7,7 @@ import (
 	"os/signal"
 	"syscall"
 
+	"github.com/oekit/concurrency/async"
 	"github.com/zy84338719/ikuai-tools-service/cmd/server/bootstrap"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/logger"
 )
@@ -19,10 +20,10 @@ func main() {
 	}
 	defer bootstrap.Cleanup()
 
-	go func() {
+	async.GoSafe(func() {
 		logger.Info("Server starting...")
 		h.Spin()
-	}()
+	})
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)

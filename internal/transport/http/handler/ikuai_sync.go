@@ -6,6 +6,7 @@ import (
 	"github.com/cloudwego/hertz/pkg/app"
 	"github.com/zy84338719/ikuai-tools-service/internal/conf"
 	"github.com/zy84338719/ikuai-tools-service/internal/job"
+	"github.com/oekit/concurrency/gopool"
 	"github.com/zy84338719/ikuai-tools-service/internal/pkg/resp"
 )
 
@@ -53,9 +54,10 @@ func TriggerCustomISPSync(ctx context.Context, c *app.RequestContext) {
 	jobsCfg := globalJobsConfig(req.GhProxy)
 	routerID := routerIDFromCtx(c)
 
-	go func() {
+	// gopool: bounded worker pool instead of an unbounded goroutine per trigger.
+	gopool.Go(func() {
 		_ = job.SyncCustomISP(routerID, cfg, jobsCfg)
-	}()
+	})
 
 	resp.SuccessWithMessage(c, "custom ISP sync triggered", nil)
 }
@@ -92,9 +94,9 @@ func TriggerStreamDomainSync(ctx context.Context, c *app.RequestContext) {
 	jobsCfg := globalJobsConfig(req.GhProxy)
 	routerID := routerIDFromCtx(c)
 
-	go func() {
+	gopool.Go(func() {
 		_ = job.SyncStreamDomain(routerID, cfg, jobsCfg)
-	}()
+	})
 
 	resp.SuccessWithMessage(c, "stream domain sync triggered", nil)
 }

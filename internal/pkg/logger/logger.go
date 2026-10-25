@@ -1,103 +1,93 @@
+// Package logger is a thin bootstrap wrapper around github.com/oekit/logx.
+// The oekit logx facade owns the actual logging (slog JSON backend with a
+// rotating-file + stdout multi-sink); this package only wires the service
+// config into it and exposes package-level helpers so call sites keep working.
 package logger
 
 import (
+	"fmt"
+	"log/slog"
 	"os"
-	"strings"
 
-	"go.uber.org/zap"
-	"go.uber.org/zap/zapcore"
+	"github.com/oekit/logx"
+	"github.com/oekit/logx/sink"
 )
 
-// Logger is initialized to a no-op logger so callers are safe before Init().
-var Logger = zap.NewNop()
-
+// Config mirrors configs/config.yaml `log:` section.
 type Config struct {
-	Level      string
-	Filename   string
-	MaxSize    int
-	MaxBackups int
-	MaxAge     int
-	Compress   bool
+	Level      string `yaml:"level" json:"level"`           // debug|info|warn|error
+	Filename   string `yaml:"filename" json:"filename"`     // empty = stdout only
+	MaxSize    int    `yaml:"max_size" json:"max_size"`     // MB per file
+	MaxBackups int    `yaml:"max_backups" json:"max_backups"`
+	MaxAge     int    `yaml:"max_age" json:"max_age"`       // days
+	Compress   bool   `yaml:"compress" json:"compress"`
 }
 
+var multiSink *sink.MultiSink
+
+// Init wires logx's default logger: slog JSON handler writing to
+// stdout + a rotating file sink (when Filename is set). Safe to call once at
+// bootstrap; later calls re-configure the default logger.
 func Init(cfg *Config) error {
-	level := getLevel(cfg.Level)
+	if cfg == nil {
+		cfg = &Config{Level: "info"}
+	}
+	lvl := logx.ParseLogLevelOr(cfg.Level, logx.LevelInfo)
 
-	encoderConfig := zapcore.EncoderConfig{
-		TimeKey:        "time",
-		LevelKey:       "level",
-		NameKey:        "logger",
-		CallerKey:      "caller",
-		MessageKey:     "msg",
-		StacktraceKey:  "stacktrace",
-		LineEnding:     zapcore.DefaultLineEnding,
-		EncodeLevel:    zapcore.LowercaseLevelEncoder,
-		EncodeTime:     zapcore.ISO8601TimeEncoder,
-		EncodeDuration: zapcore.SecondsDurationEncoder,
-		EncodeCaller:   zapcore.ShortCallerEncoder,
+	slogLevel := slog.LevelInfo
+	switch lvl {
+	case logx.LevelDebug:
+		slogLevel = slog.LevelDebug
+	case logx.LevelWarn:
+		slogLevel = slog.LevelWarn
+	case logx.LevelError:
+		slogLevel = slog.LevelError
 	}
 
-	consoleEncoder := zapcore.NewConsoleEncoder(encoderConfig)
-	consoleCore := zapcore.NewCore(consoleEncoder, zapcore.AddSync(os.Stdout), level)
-
-	var core zapcore.Core
+	var sinks []sink.Sink
+	sinks = append(sinks, os.Stdout)
 	if cfg.Filename != "" {
-		// 0600: log files may contain sensitive request data; restrict to owner only.
-		file, err := os.OpenFile(cfg.Filename, os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0600)
+		rs, err := sink.NewRotatingSink(cfg.Filename, orDefault(cfg.MaxSize, 100),
+			sink.WithMaxBackups(cfg.MaxBackups),
+			sink.WithMaxAge(cfg.MaxAge),
+			sink.WithCompress(cfg.Compress),
+		)
 		if err != nil {
-			return err
+			return fmt.Errorf("log file sink: %w", err)
 		}
-		fileCore := zapcore.NewCore(zapcore.NewJSONEncoder(encoderConfig), zapcore.AddSync(file), level)
-		core = zapcore.NewTee(consoleCore, fileCore)
-	} else {
-		core = consoleCore
+		sinks = append(sinks, rs)
 	}
+	multiSink = sink.NewMultiSink(sinks...)
 
-	Logger = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
+	logx.SetDefault(logx.NewSlogLogger("ikuai-tools",
+		logx.WithLevel(lvl),
+		logx.WithHandler(slog.NewJSONHandler(multiSink, &slog.HandlerOptions{Level: slogLevel})),
+	))
 	return nil
 }
 
-func getLevel(level string) zapcore.Level {
-	switch strings.ToLower(level) {
-	case "debug":
-		return zapcore.DebugLevel
-	case "info":
-		return zapcore.InfoLevel
-	case "warn", "warning":
-		return zapcore.WarnLevel
-	case "error":
-		return zapcore.ErrorLevel
-	case "fatal":
-		return zapcore.FatalLevel
-	default:
-		return zapcore.InfoLevel
+// Sync flushes buffered sink writes. Call on shutdown.
+func Sync() {
+	if multiSink != nil {
+		_ = multiSink.Sync()
 	}
 }
 
-func Sync() {
-	_ = Logger.Sync()
+// Close flushes and closes the sinks.
+func Close() {
+	if multiSink != nil {
+		_ = multiSink.Close()
+	}
 }
 
-func Debug(msg string, fields ...zap.Field) {
-	Logger.Debug(msg, fields...)
-}
+func Info(msg string, kv ...any) { logx.Info(msg, kv...) }
+func Warn(msg string, kv ...any) { logx.Warn(msg, kv...) }
+func Error(msg string, kv ...any) { logx.Error(msg, kv...) }
+func Debug(msg string, kv ...any) { logx.Debug(msg, kv...) }
 
-func Info(msg string, fields ...zap.Field) {
-	Logger.Info(msg, fields...)
-}
-
-func Warn(msg string, fields ...zap.Field) {
-	Logger.Warn(msg, fields...)
-}
-
-func Error(msg string, fields ...zap.Field) {
-	Logger.Error(msg, fields...)
-}
-
-func Fatal(msg string, fields ...zap.Field) {
-	Logger.Fatal(msg, fields...)
-}
-
-func With(fields ...zap.Field) *zap.Logger {
-	return Logger.With(fields...)
+func orDefault(v, def int) int {
+	if v <= 0 {
+		return def
+	}
+	return v
 }
