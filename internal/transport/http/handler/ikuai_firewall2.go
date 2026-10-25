@@ -28,7 +28,7 @@ func ListIPv6Group(ctx context.Context, c *app.RequestContext) {
 	if api == nil {
 		return
 	}
-	data, err := api.Objects().ListObjectsIpv6Objects(ctx, nil)
+	data, err := api.Objects().ListObjectsIp6Objects(ctx, nil)
 	if err != nil {
 		resp.InternalError(c, err.Error())
 		return

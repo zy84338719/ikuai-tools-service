@@ -374,7 +374,6 @@ func registerIKuaiRoutes(h *server.Hertz) {
 	mon.GET("/interfaces-traffic", apihandler.GetInterfacesTraffic)
 	mon.GET("/downstream", apihandler.GetDownstream)
 	mon.GET("/switch", apihandler.GetSwitch)
-	mon.GET("/network", apihandler.GetNetworkTopology)
 	mon.GET("/app-traffic-summary", apihandler.GetAppTrafficSummary)
 	mon.GET("/clients-traffic-summary", apihandler.GetClientsTrafficSummary)
 

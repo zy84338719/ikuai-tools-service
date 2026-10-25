@@ -30,13 +30,6 @@ func GetSwitch(ctx context.Context, c *app.RequestContext) {
 	resp.Success(c, data)
 }
 
-func GetNetworkTopology(ctx context.Context, c *app.RequestContext) {
-	api := ikuaiAPI(c); if api == nil { return }
-	data, err := api.Monitoring().GetMonitoringNetwork(ctx)
-	if err != nil { resp.InternalError(c, err.Error()); return }
-	resp.Success(c, data)
-}
-
 func GetAppTrafficSummary(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c); if api == nil { return }
 	data, err := api.Monitoring().GetMonitoringAppTrafficSummary(ctx)

@@ -13,7 +13,7 @@ require (
 	github.com/prometheus/client_golang v1.25.0
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/spf13/viper v1.19.0
-	github.com/zy84338719/ikuai-api v1.0.1
+	github.com/zy84338719/ikuai-api v1.3.0
 	github.com/zy84338719/ikuai_exporter v0.0.0
 	google.golang.org/protobuf v1.36.12
 	gorm.io/driver/mysql v1.5.7

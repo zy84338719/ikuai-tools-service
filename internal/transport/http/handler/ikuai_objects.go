@@ -105,7 +105,7 @@ func DeletePortObjects(ctx context.Context, c *app.RequestContext) {
 // Protocol objects
 func ListProtocolObjects(ctx context.Context, c *app.RequestContext) {
 	api := ikuaiAPI(c); if api == nil { return }
-	data, err := api.Objects().ListObjectsProtocolObjects(ctx, nil)
+	data, err := api.Objects().ListObjectsProtoObjects(ctx, nil)
 	if err != nil { resp.InternalError(c, err.Error()); return }
 	resp.Success(c, data)
 }
@@ -113,7 +113,7 @@ func AddProtocolObjects(ctx context.Context, c *app.RequestContext) {
 	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil { resp.BadRequest(c, err.Error()); return }
 	api := ikuaiAPI(c); if api == nil { return }
-	id, err := api.Objects().CreateObjectsProtocolObjects(ctx, req)
+	id, err := api.Objects().CreateObjectsProtoObjects(ctx, req)
 	if err != nil { resp.InternalError(c, err.Error()); return }
 	resp.Success(c, map[string]int64{"id": id})
 }
@@ -121,14 +121,14 @@ func EditProtocolObjects(ctx context.Context, c *app.RequestContext) {
 	var req map[string]any
 	if err := c.BindAndValidate(&req); err != nil { resp.BadRequest(c, err.Error()); return }
 	api := ikuaiAPI(c); if api == nil { return }
-	if err := api.Objects().UpdateObjectsProtocolObjects(ctx, req); err != nil { resp.InternalError(c, err.Error()); return }
+	if err := api.Objects().UpdateObjectsProtoObjects(ctx, req); err != nil { resp.InternalError(c, err.Error()); return }
 	resp.Success(c, nil)
 }
 func DeleteProtocolObjects(ctx context.Context, c *app.RequestContext) {
 	id, err := strconv.ParseInt(string(c.Param("id")), 10, 64)
 	if err != nil { resp.BadRequest(c, "invalid id"); return }
 	api := ikuaiAPI(c); if api == nil { return }
-	if err := api.Objects().DeleteObjectsProtocolObjects(ctx, id); err != nil { resp.InternalError(c, err.Error()); return }
+	if err := api.Objects().DeleteObjectsProtoObjects(ctx, id); err != nil { resp.InternalError(c, err.Error()); return }
 	resp.Success(c, nil)
 }
 

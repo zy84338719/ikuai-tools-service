@@ -152,12 +152,16 @@ func (r *Registry) Names() []string {
 	return out
 }
 
-// Close closes every registered client.
+// Close closes every registered client. ikuai-api v1.3.0 made Close
+// context-aware; a short timeout keeps shutdown snappy even if a router is
+// unreachable.
 func (r *Registry) Close() {
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	for _, m := range r.managers {
-		m.client.Close()
+		_ = m.client.Close(ctx)
 	}
 	r.managers = map[string]*Manager{}
 	r.default_ = ""
@@ -179,7 +183,9 @@ func (m *Manager) IsConnected() bool { return m != nil && m.api != nil }
 // Close releases the underlying transport.
 func (m *Manager) Close() {
 	if m != nil && m.client != nil {
-		m.client.Close()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		_ = m.client.Close(ctx)
 	}
 }
 
