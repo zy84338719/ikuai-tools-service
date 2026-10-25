@@ -125,11 +125,10 @@ job（定时）→ Registry.Names() 遍历每台路由器 → SyncCustomISP/Sync
 
 ### Docker
 
-Dockerfile 从 **monorepo 根** 构建（服务通过本地 `replace` 依赖同级的 `ikuai-api/` 和 `ikuai_exporter/`）：
+单仓库标准构建（依赖 ikuai-api v1.3.0 / ikuai_exporter v1.0.1 / oekit 均从 module proxy 按正式版本解析）：
 
 ```bash
-# 在包含 ikuai-api/ ikuai_exporter/ ikuai-tools-service/ 的目录下
-docker build -t ikuai-tools-service -f ikuai-tools-service/Dockerfile .
+docker build -t ikuai-tools-service .
 
 # 运行（挂载真实配置 + 数据库卷）
 docker run -d -p 9997:9997 -p 9100:9100 \
@@ -140,6 +139,21 @@ docker run -d -p 9997:9997 -p 9100:9100 \
 ```
 
 > 默认 SQLite 数据库落在 `/app`；如用 MySQL/PostgreSQL，在 config 里配 `database.*`。
+
+### 本地开发
+
+仓库的 `go.mod` 只引用正式发布版本；本地联调未发布的 sibling 改动时，用 Go workspace（`go.work` 已 gitignore）：
+
+```bash
+cat > go.work <<'EOF'
+go 1.26.0
+
+use .
+
+replace github.com/zy84338719/ikuai-api => ../ikuai-api
+replace github.com/zy84338719/ikuai_exporter => ../ikuai_exporter
+EOF
+```
 
 ## 技术栈
 

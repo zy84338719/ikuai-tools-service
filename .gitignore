@@ -32,3 +32,7 @@ configs/config.yaml
 *.db
 *.db-shm
 *.db-wal
+
+# Local dev workspace (published deps live in go.mod)
+go.work
+go.work.sum

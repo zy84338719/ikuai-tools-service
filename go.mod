@@ -14,7 +14,7 @@ require (
 	github.com/redis/go-redis/v9 v9.23.0
 	github.com/spf13/viper v1.19.0
 	github.com/zy84338719/ikuai-api v1.3.0
-	github.com/zy84338719/ikuai_exporter v0.0.0
+	github.com/zy84338719/ikuai_exporter v1.0.1
 	google.golang.org/protobuf v1.36.12
 	gorm.io/driver/mysql v1.5.7
 	gorm.io/driver/postgres v1.5.11
@@ -31,11 +31,6 @@ require (
 	golang.org/x/crypto v0.58.0 // indirect
 	golang.org/x/time v0.16.0 // indirect
 	gopkg.in/natefinch/lumberjack.v2 v2.2.1 // indirect
-)
-
-replace (
-	github.com/zy84338719/ikuai-api => ../ikuai-api
-	github.com/zy84338719/ikuai_exporter => ../ikuai_exporter
 )
 
 require (

@@ -200,6 +200,10 @@ github.com/twitchyliquid64/golang-asm v0.15.1 h1:SU5vSMR7hnwNxj24w34ZyCi/FmDZTkS
 github.com/twitchyliquid64/golang-asm v0.15.1/go.mod h1:a1lVb/DtPvCB8fslRZhAngC2+aY1QWCk3Cedj/Gdt08=
 github.com/zeebo/xxh3 v1.1.0 h1:s7DLGDK45Dyfg7++yxI0khrfwq9661w9EN78eP/UZVs=
 github.com/zeebo/xxh3 v1.1.0/go.mod h1:IisAie1LELR4xhVinxWS5+zf1lA4p0MW4T+w+W07F5s=
+github.com/zy84338719/ikuai-api v1.3.0 h1:pQTpDpKSU4ngSGQwkYowT6t2+Ced6jTjiXkkbblI18s=
+github.com/zy84338719/ikuai-api v1.3.0/go.mod h1:1a4O2fQjZG+dO6GcqdtiQ+dj4zyLS5cAoL6rRnHgt9g=
+github.com/zy84338719/ikuai_exporter v1.0.1 h1:MMQAEGcOVSbZH0NSL/CQnqIfzCpKZzH39qTEPgb0Cho=
+github.com/zy84338719/ikuai_exporter v1.0.1/go.mod h1:oCanR/Ip71OLYN3VXOGU/JtV9Q6gChxdiPUifcC0pqM=
 go.uber.org/atomic v1.9.0/go.mod h1:fEN4uk6kAWBTFdckzkM89CLk9XfWZrxpCo0nPH17wJc=
 go.uber.org/atomic v1.12.0 h1:BvcXdFKuviU4fTL/f+SxdQ5qJX/Jix8pAkgdUcb3XOE=
 go.uber.org/atomic v1.12.0/go.mod h1:I6c4cg+6HCxRjfjSsYtApoFILnpc0CGUdGkXVqbYVNk=

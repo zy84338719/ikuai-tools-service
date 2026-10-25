@@ -1,28 +1,22 @@
 # Build the ikuai-tools-service image.
 #
-# The service depends on ikuai-api and ikuai_exporter via local `replace`
-# directives (../ikuai-api, ../ikuai_exporter). Build this Dockerfile with the
-# monorepo root as the context so those siblings resolve:
+# All dependencies resolve from the module proxy at published versions
+# (ikuai-api v1.3.0, ikuai_exporter v1.0.1, oekit) — a plain single-repo build:
 #
-#   docker build -t ikuai-tools-service -f ikuai-tools-service/Dockerfile .
-#
-# (run from the directory containing ikuai-api/, ikuai_exporter/, ikuai-tools-service/)
+#   docker build -t ikuai-tools-service .
 
-# Match the Go version pinned in ikuai-tools-service/go.mod (go 1.24.0).
-FROM golang:1.24-alpine AS builder
+FROM golang:1.25-alpine AS builder
 
 WORKDIR /src
 
 RUN apk add --no-cache git
 
-# Copy the three repos side-by-side so the local replace directives resolve.
-COPY ikuai-api/        ./ikuai-api/
-COPY ikuai_exporter/   ./ikuai_exporter/
-COPY ikuai-tools-service/ ./ikuai-tools-service/
-
-WORKDIR /src/ikuai-tools-service
+COPY go.mod go.sum ./
 RUN go mod download
-RUN CGO_ENABLED=0 GOOS=linux go build -o /out/server ./cmd/server
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build -ldflags="-s -w" -o /out/server ./cmd/server
 
 # --- runtime image ---
 FROM alpine:latest
@@ -34,7 +28,7 @@ RUN apk --no-cache add ca-certificates tzdata
 COPY --from=builder /out/server ./server
 # Ship the example config so the container runs out of the box; mount a real
 # config.yaml at /app/configs/config.yaml (or set CONFIG_PATH) in production.
-COPY ikuai-tools-service/configs/config.yaml.example ./configs/config.yaml.example
+COPY configs/config.yaml.example ./configs/config.yaml.example
 
 # API port (default 9997) and the embedded Prometheus exporter port (9100).
 EXPOSE 9997 9100
